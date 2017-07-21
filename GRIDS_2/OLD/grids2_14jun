@@ -1,0 +1,2696 @@
+#DECK cdf.F90
+module cdf
+
+  use param
+  use field_defs
+  use netcdf
+
+  implicit none
+
+  integer, parameter :: ndim1 = 1, ndim2 = 2, ndim3 = 3, ndim4 = 4
+
+  integer, dimension(ndim1) :: dim1, corner1, edge1
+  integer, dimension(ndim2) :: dim2, corner2, edge2
+  integer, dimension(ndim3) :: dim3, corner3, edge3
+  integer, dimension(ndim4) :: dim4, corner4, edge4
+
+  !character(len=20) :: dirout = '/data1/GRIDS/'
+  character(len=20) :: dirout = '/data1/TEST/'
+
+#ifdef add_extra_row
+  character(len=8) :: csrc = '_xrow.nc'
+#else
+  character(len=8) :: csrc = '.nc     '
+#endif
+#ifdef hycom1deg
+  character(len=60) :: gridcdf = 'kiss1deg_grid'
+#endif
+#ifdef hycom_024
+  character(len=60) :: gridcdf = 'kiss024_grid'
+#endif
+#ifdef hycom_008
+  character(len=60) :: gridcdf = 'kiss008_grid'
+#endif
+#ifdef hycom_072
+  character(len=60) :: gridcdf = 'kiss072_grid'
+#endif
+
+  real(kind=8) :: mval = -9999.
+
+  integer :: rc,ncid
+  integer :: xdim, ydim, ymdim, datid
+
+  contains
+   
+  !-----------------------------------------------------------------------------
+   
+  subroutine setup_cdf
+
+            integer :: ii
+  character(len=12) :: vname, vunit, stggr
+  character(len=60) :: vlong
+  character(len=60) :: outcdf
+
+  outcdf = trim(dirout)//trim(gridcdf)//trim(csrc)
+  print *,trim(outcdf)
+
+  rc = nf90_create(trim(outcdf), nf90_clobber, ncid)
+  print *,trim(nf90_strerror(rc))
+
+  rc = nf90_def_dim(ncid, 'ni',   ihycom,    xdim)
+  rc = nf90_def_dim(ncid, 'nj',   jhycom,    ydim)
+  rc = nf90_def_dim(ncid, 'njm1', jhycom-1, ymdim)
+
+  ! land+masks (ip,iq,iu,iv,land)
+  do ii = 1,5 
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+#ifdef add_extra_row
+    dim2(2) =  ydim
+#else
+    dim2(2) = ymdim
+#endif
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+   rc = nf90_def_var(ncid, vname,    nf90_int,  dim2,  datid)
+   rc = nf90_put_att(ncid, datid,            'units',  vunit)
+   rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+  enddo
+
+  do ii = 6,nvars
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+#ifdef add_extra_row
+    dim2(2) =  ydim
+#else
+    dim2(2) = ymdim
+#endif
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+#ifdef hycom_008
+    rc = nf90_def_var(ncid, vname, nf90_float,  dim2,  datid)
+#else
+    rc = nf90_def_var(ncid, vname, nf90_double,  dim2,  datid)
+#endif
+    rc = nf90_put_att(ncid, datid,            'units',  vunit)
+    rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+#ifdef hycom_008
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  0.00)
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, '_FillValue',     0.00)
+#else
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  0.0d0)
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, '_FillValue',     0.0d0)
+#endif
+  enddo !ii
+   rc = nf90_enddef(ncid)
+   rc = nf90_close(ncid)
+
+  end subroutine setup_cdf
+
+  !-----------------------------------------------------------------------------
+
+  subroutine putcdf(vname,jdim,ain,iin)
+
+                                  integer, intent(in) :: jdim
+                         character(len=*), intent(in) :: vname
+#ifdef hycom_008
+     real(kind=4), dimension(ihycom,jdim), intent(in) :: ain
+#else
+     real(kind=8), dimension(ihycom,jdim), intent(in) :: ain
+#endif
+  integer(kind=4), dimension(ihycom,jdim), intent(in) :: iin
+
+  character(len=60) :: outcdf
+  integer :: xtype
+
+  outcdf = trim(dirout)//trim(gridcdf)//trim(csrc)
+  print *,'writing ',trim(vname),' to ',trim(outcdf)
+
+  rc = nf90_open(trim(outcdf), nf90_write, ncid)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+
+  rc = nf90_inq_varid(ncid, trim(vname),  datid)
+  rc = nf90_inquire_variable(ncid, datid, xtype=xtype)
+
+  if(xtype .eq. 4)rc = nf90_put_var(ncid,      datid,       iin)
+  !if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  if(xtype .eq. 5)rc = nf90_put_var(ncid,      datid,       ain)
+  if(xtype .eq. 6)rc = nf90_put_var(ncid,      datid,       ain)
+  !if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  rc = nf90_close(ncid)
+
+  end subroutine putcdf
+end module cdf
+#DECK data.F90
+module data
+
+ use param
+
+ implicit none
+
+  integer(kind=4), dimension(ihycom,jhycom) :: land
+  ! masks on p grid
+  integer(kind=4), dimension(ihycom,jhycom) :: ip
+  ! masks on other grids
+  integer(kind=4), dimension(ihycom,jhycom) :: iq
+  integer(kind=4), dimension(ihycom,jhycom) :: iu
+  integer(kind=4), dimension(ihycom,jhycom) :: iv
+
+     real(kind=4), dimension(ihycom,jhycom) :: depths
+
+     real(kind=4), dimension(ihycom,jhycom) :: plon, plat, &
+                                               qlon, qlat, &
+                                               ulon, ulat, &
+                                               vlon, vlat, &
+                                               pscx, pscy, &
+                                               qscx, qscy, &
+                                               uscx, uscy, &
+                                               vscx, vscy, &
+                                               pang, cori
+
+end module data
+#DECK extract2d.F90
+subroutine extract2d(name,jdim,ain,iin)
+
+  use param
+  use cdf
+
+  implicit none
+ 
+           integer, intent( in) :: jdim
+  character(len=*), intent( in) :: name
+      real(kind=4), intent( in) :: ain(ihycom,jhycom)
+   integer(kind=4), intent( in) :: iin(ihycom,jhycom)
+#ifdef hycom_008
+      real(kind=4) :: a2d(ihycom,jdim)
+#else
+      real(kind=8) :: a2d(ihycom,jdim)
+#endif
+   integer(kind=4) :: i2d(ihycom,jdim)
+
+  integer :: i,j,ii,jj
+
+  a2d = 0.0
+  i2d = 0.0
+  print *,
+  print *,'starting values ',trim(name),' ',minval(ain),maxval(ain),&
+                                        ' ',minval(iin),maxval(iin)
+
+  a2d(1:ihycom,1:jdim) = ain(1:ihycom,1:jdim)
+  i2d(1:ihycom,1:jdim) = iin(1:ihycom,1:jdim)
+  print *,'ending   values ',trim(name),' ',minval(real(a2d,4)),maxval(real(a2d,4)),&
+                                        ' ',minval(i2d),maxval(i2d)
+
+  call putcdf(trim(name),jdim,a2d,i2d)
+
+end subroutine extract2d
+#DECK field_defs.F90
+module field_defs
+
+  use param
+
+  implicit none
+
+  type FieldsDefs
+    character(len=12)                           :: varname
+    character(len=12)                           :: varunit
+    character(len=60)                           :: varlong
+    character(len=12)                           :: stagger
+  end type FieldsDefs
+
+  type(FieldsDefs) :: gridfields(nvars)
+
+  contains
+
+  subroutine fieldatts_setup
+
+  integer :: i
+  integer :: ii = 0
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'land'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ip'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iu'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iv'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iq'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'bathy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'bathymetry on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pang'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'angle of p grid w/rt standard lat/lon'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'cori'
+  gridfields(ii)%varunit     = 's-1'
+  gridfields(ii)%varlong     = 'coriolis parameter on q grid'
+  gridfields(ii)%stagger     = 'center'
+
+  if(ii .ne. nvars)stop
+
+ end subroutine fieldatts_setup
+end module field_defs
+#DECK grid_lonlat.F90
+      subroutine grid_lonlat
+#ifdef hycom1deg
+      use param
+      use data
+
+      implicit none
+!c
+      integer :: idm, jdm
+
+      integer          i,j,mapflg
+      logical          lperiod
+      real             hmaxa,hmina
+
+      real*4 spherdist  ! fn for distance between geo. pos
+!c
+      double precision, parameter :: half   = 0.5d0
+      double precision, parameter :: halfpi = 1.5707963268d0
+      double precision, parameter :: radian = 57.29578d0
+#ifdef test
+      double precision pntlon,pntlat,oldlon,oldlat
+c
+c --- create a specified longitude and latitude grid definition file.
+c
+c --- for compatibility:
+c ---   idm,jdm are input from regional.grid.b,
+c ---   and the output is to fort.61 and fort.61A
+c ---   the latter should subsequently be renamed regional.grid.[ab].
+c
+      real*4 spherdist  ! fn for distance between geo. pos
+c
+      double precision, parameter :: half   = 0.5d0
+      double precision, parameter :: halfpi = 1.5707963268d0
+      double precision, parameter :: radian = 57.29578d0
+c
+      integer, allocatable :: ip(:,:)
+      real, allocatable    :: pang(:,:),cori(:,:)
+      real, allocatable    :: plon(:,:),qlon(:,:),ulon(:,:),vlon(:,:)
+      real, allocatable    :: plat(:,:),qlat(:,:),ulat(:,:),vlat(:,:)
+      real, allocatable    :: pscx(:,:),qscx(:,:),uscx(:,:),vscx(:,:)
+      real, allocatable    :: pscy(:,:),qscy(:,:),uscy(:,:),vscy(:,:)
+c
+      call xcspmd  !input idm,jdm
+      allocate(   ip(idm,jdm) )
+      allocate( pang(idm,jdm), cori(idm,jdm) )
+      allocate( plat(idm,jdm), plon(idm,jdm) )
+      allocate( qlat(idm,jdm), qlon(idm,jdm) )
+      allocate( ulat(idm,jdm), ulon(idm,jdm) )
+      allocate( vlat(idm,jdm), vlon(idm,jdm) )
+      allocate( pscy(idm,jdm), pscx(idm,jdm) )
+      allocate( qscy(idm,jdm), qscx(idm,jdm) )
+      allocate( uscy(idm,jdm), uscx(idm,jdm) )
+      allocate( vscy(idm,jdm), vscx(idm,jdm) )
+c
+c --- read in the map projection.
+c ---   'idm   ' = longitudinal array size
+c ---   'jdm   ' = latitudinal  array size
+c ---   'pntlon' = longitudinal grid point on pressure grid (idm values)
+c ---   'pntlat' = latitudinal  grid point on pressure grid (jdm values)
+c
+      mapflg = 2
+      call blkini(i,      'idm   ')
+      call blkini(j,      'jdm   ')
+c
+      if     (i.ne.idm .or. j.ne.jdm) then
+        write(lp,'(/a,a/)') 'stdin and regional.grid.b have',
+     &                      ' different idm,jdm values'
+        call flush(lp)
+        stop
+      endif
+c
+      oldlon = -999.9
+      do i= 1,idm
+        call blkinr(pntlon,
+     &             'pntlon','("blkinr: ",a6," =",f11.4," ")')
+c
+        if     (pntlon.le.oldlon) then
+          write(lp,'(/a/)') 'pntlon must be an ascending sequence'
+          call flush(lp)
+          stop
+        endif
+c
+        plon(i,:) = pntlon
+        oldlon    = pntlon
+      enddo
+c
+      oldlat = -90.01
+      do j= 1,jdm
+        call blkinr(pntlat,
+     &             'pntlat','("blkinr: ",a6," =",f11.4," ")')
+c
+        if     (pntlat.le.oldlat) then
+          write(lp,'(/a/)') 'pntlat must be an ascending sequence'
+          call flush(lp)
+          stop
+        endif
+c
+        plat(:,j) = pntlat
+        oldlat    = pntlat
+      enddo
+#endif
+
+     idm = ihycom; jdm = jhycom
+!c
+!c --- define the 4 staggered grids.
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          pang(i,j) = 0.0  ! standard lon-lat orientation
+!c
+          vlon(i,j) = plon(i,j)
+          if     (i.ne.1) then
+            qlon(i,j) = 0.5*(plon(i-1,j) + plon(i,j))
+          else
+            qlon(i,j) = 1.5*plon(1,j) - 0.5*plon(2,j)
+          endif
+          ulon(i,j) = qlon(i,j)
+!c
+          ulat(i,j) = plat(i,j)
+          if     (j.ne.1) then
+            qlat(i,j) = 0.5*(plat(i,j-1) + plat(i,j))
+          else
+            qlat(i,j) = 1.5*plat(i,1) - 0.5*plat(i,2)
+          endif
+          vlat(i,j) = qlat(i,j)
+        enddo
+      enddo
+!c
+#ifdef test
+      write(6, *)
+      do j= 1,jdm
+        write(6,'(a,i5,2f10.3)') &
+          'j,qlat =',j,minval(qlat(:,j)),maxval(qlat(:,j))
+        write(6,'(a,i5,2f10.3)') &
+          'j,plat =',j,minval(plat(:,j)),maxval(plat(:,j))
+      enddo
+      write(6, *)
+      do i= 1,idm
+        write(6,'(a,i5,2f10.3)') &
+          'i,qlon =',i,minval(qlon(i,:)),maxval(qlon(i,:))
+        write(6,'(a,i5,2f10.3)') &
+          'i,plon =',i,minval(plon(i,:)),maxval(plon(i,:))
+      enddo
+#endif
+#ifdef test
+c
+c --- write header.
+c
+      call zhopen(61, 'formatted', 'new', 0)
+      write(61,'(i5,a)')
+     &  idm,   "    'idm   ' = longitudinal array size"
+      write(61,'(i5,a)')
+     &  jdm,   "    'jdm   ' = latitudinal  array size"
+      write(61,'(i5,a,a)')
+     &  mapflg,"    'mapflg' = map flag",
+     &         " (-1=unknown,0=mercator,2=uniform,4=f-plane)"
+c
+      write(6, *)
+      write(6,'(i5,a)')
+     &  idm,   "    'idm   ' = longitudinal array size"
+      write(6,'(i5,a)')
+     &  jdm,   "    'jdm   ' = latitudinal  array size"
+      write(6,'(i5,a)')
+     &  mapflg,"    'mapflg' = map flag (-1=unknown,0=mercator,...)"
+c
+c --- write grid arrays.
+c
+      call zaiost
+      call zaiopn('new', 61)
+      call zaiowr(plon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'plon',hmina,hmaxa
+      write(6, 6100) 'plon',hmina,hmaxa
+      call zaiowr(plat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'plat',hmina,hmaxa
+      write(6, 6100) 'plat',hmina,hmaxa
+      call zaiowr(qlon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'qlon',hmina,hmaxa
+      write(6, 6100) 'qlon',hmina,hmaxa
+      call zaiowr(qlat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'qlat',hmina,hmaxa
+      write(6, 6100) 'qlat',hmina,hmaxa
+      call zaiowr(ulon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'ulon',hmina,hmaxa
+      write(6, 6100) 'ulon',hmina,hmaxa
+      call zaiowr(ulat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'ulat',hmina,hmaxa
+      write(6, 6100) 'ulat',hmina,hmaxa
+      call zaiowr(vlon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'vlon',hmina,hmaxa
+      write(6, 6100) 'vlon',hmina,hmaxa
+      call zaiowr(vlat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'vlat',hmina,hmaxa
+      write(6, 6100) 'vlat',hmina,hmaxa
+      call zaiowr(pang, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'pang',hmina,hmaxa
+      write(6, 6100) 'pang',hmina,hmaxa
+      write(6, *)
+ 6100 format(a,':  min,max = ',2f15.5)
+#endif
+!c
+!c --- grid spacing in meters.
+!c
+      lperiod = maxval(plon(:,:))-minval(plon(:,:)) .gt. 350.0
+      if     (lperiod) then
+        write(6,'(a)') 'domain assumed to be periodic'
+      else
+        write(6,'(a)') 'domain assumed to be non-periodic'
+      endif
+!c
+      do j= 1,jdm
+        do i= 2,idm
+          uscx(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                plon(i-1,j),plat(i-1,j) )
+          qscx(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                vlon(i-1,j),vlat(i-1,j) )
+        enddo
+        i=1
+        if     (lperiod) then
+          uscx(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                plon(idm,j),plat(idm,j) )
+          qscx(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                vlon(idm,j),vlat(idm,j) )
+        else
+          uscx(i,j) = uscx(i+1,j)  ! updated below except in corner
+          qscx(i,j) = qscx(i+1,j)  ! updated below except in corner
+        endif
+        do i= 1,idm-1
+          vscx(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                qlon(i+1,j),qlat(i+1,j) )
+          pscx(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                ulon(i+1,j),ulat(i+1,j) )
+        enddo
+        i=idm
+        if     (lperiod) then
+          vscx(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                qlon(1,  j),qlat(1,  j) )
+          pscx(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                ulon(1,  j),ulat(1,  j) )
+        else
+          vscx(i,j) = vscx(i-1,j)  ! updated below except in corner
+          pscx(i,j) = pscx(i-1,j)  ! updated below except in corner
+        endif
+      enddo
+!c
+      do j= 1,jdm
+        if     (j.ne.1) then
+          do i= 1,idm
+            vscy(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                  plon(i,j-1),plat(i,j-1) )
+            qscy(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                  ulon(i,j-1),ulat(i,j-1) )
+          enddo
+        endif
+        if     (j.ne.jdm) then
+          do i= 1,idm
+            uscy(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                  qlon(i,j+1),qlat(i,j+1) )
+            pscy(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                  vlon(i,j+1),vlat(i,j+1) )
+          enddo
+        endif
+      enddo
+!c
+!c     fill in the edges, assuming constant grid aspect ratio
+!c
+      j=1
+      do i= 1,idm
+        vscy(i,j) = vscx(i,j)*vscy(i,j+1)/vscx(i,j+1)
+        qscy(i,j) = qscx(i,j)*qscy(i,j+1)/qscx(i,j+1)
+      enddo
+      j=jdm
+      do i= 1,idm
+        uscy(i,j) = uscx(i,j)*uscy(i,j-1)/uscx(i,j-1)
+        pscy(i,j) = pscx(i,j)*pscy(i,j-1)/pscx(i,j-1)
+      enddo
+!c
+      if     (.not.lperiod) then
+        i=1
+        do j= 1,jdm
+          uscx(i,j) = uscy(i,j)*uscx(i+1,j)/uscy(i+1,j)
+          qscx(i,j) = qscy(i,j)*qscx(i+1,j)/qscy(i+1,j)
+        enddo
+        i=idm
+        do j= 1,jdm
+          vscx(i,j) = vscy(i,j)*vscx(i-1,j)/vscy(i-1,j)
+          pscx(i,j) = pscy(i,j)*pscx(i-1,j)/pscy(i-1,j)
+        enddo
+      endif
+!c
+#ifdef test
+      write(6, *)
+      do j= 1,jdm
+        write(6,'(a,i5,3f10.2)') &
+          'j,vy =',j,minval(vscy(:,j)),maxval(vscy(:,j)), &
+                     maxval(vscy(:,j))-minval(vscy(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,vx =',j,minval(vscx(:,j)),maxval(vscx(:,j)), &
+                     maxval(vscx(:,j))-minval(vscx(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,uy =',j,minval(uscy(:,j)),maxval(uscy(:,j)), &
+                     maxval(uscy(:,j))-minval(uscy(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,ux =',j,minval(uscx(:,j)),maxval(uscx(:,j)), &
+                     maxval(uscx(:,j))-minval(uscx(:,j))
+      enddo
+      write(6, *)
+#endif
+#ifdef test
+c
+c --- write grid arrays.
+c
+      call zaiowr(pscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'pscx',hmina,hmaxa
+      write(6, 6110) 'pscx',hmina,hmaxa
+      call zaiowr(pscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'pscy',hmina,hmaxa
+      write(6, 6110) 'pscy',hmina,hmaxa
+      call zaiowr(qscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'qscx',hmina,hmaxa
+      write(6, 6110) 'qscx',hmina,hmaxa
+      call zaiowr(qscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'qscy',hmina,hmaxa
+      write(6, 6110) 'qscy',hmina,hmaxa
+      call zaiowr(uscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'uscx',hmina,hmaxa
+      write(6, 6110) 'uscx',hmina,hmaxa
+      call zaiowr(uscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'uscy',hmina,hmaxa
+      write(6, 6110) 'uscy',hmina,hmaxa
+      call zaiowr(vscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'vscx',hmina,hmaxa
+      write(6, 6110) 'vscx',hmina,hmaxa
+      call zaiowr(vscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'vscy',hmina,hmaxa
+      write(6, 6110) 'vscy',hmina,hmaxa
+      write(6, *)
+ 6110 format(a,':  min,max = ',2f15.5)
+#endif
+!c
+!c --- coriolis
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          cori(i,j)=sin(qlat(i,j)/radian)* &
+                    8.d0*halfpi/86164.0d0  ! sidereal day
+        enddo
+      enddo
+#ifdef test
+c
+      call zaiowr(cori, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6120) 'cori',hmina,hmaxa
+      write(6, 6120) 'cori',hmina,hmaxa
+      write(6, *)
+ 6120 format(a,':  min,max = ',2f15.10)
+#endif
+#ifdef test
+!c
+!c --- grid aspect ratio.
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          if     (pscy(i,j).eq.0.0) then
+            pscx(i,j) = 99.0
+          elseif (pscx(i,j).ge.99.0*pscy(i,j)) then
+            pscx(i,j) = 99.0
+          else
+            pscx(i,j) = pscx(i,j)/pscy(i,j)
+          endif
+        enddo
+      enddo
+c
+      call zaiowr(pscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6130) 'pasp',hmina,hmaxa
+      write(6, 6130) 'pasp',hmina,hmaxa
+      write(6, *)
+ 6130 format(a,':  min,max = ',2f15.5)
+c
+      close(unit=61)
+      call zaiocl(61)
+c
+      end
+      subroutine blkinr(rvar,cvar,cfmt)
+      implicit none
+c
+      double precision rvar
+      character        cvar*6,cfmt*(*)
+c
+      integer       lp
+      common/linepr/lp
+c
+c     read in one real value from stdin
+c
+      character*6 cvarin
+c
+      read(*,*) rvar,cvarin
+      write(lp,cfmt) cvarin,rvar
+      call flush(lp)
+c
+      if     (cvar.ne.cvarin) then
+        write(lp,*) 
+        write(lp,*) 'error in blkinr - input ',cvarin,
+     +                      ' but should be ',cvar
+        write(lp,*) 
+        call flush(lp)
+        stop
+      endif
+      return
+      end
+      subroutine blkini(ivar,cvar)
+      implicit none
+c
+      integer     ivar
+      character*6 cvar
+c
+      integer       lp
+      common/linepr/lp
+c
+c     read in one integer value from stdin
+c
+      character*6 cvarin
+c
+      read(*,*) ivar,cvarin
+      write(lp,6000) cvarin,ivar
+      call flush(lp)
+c
+      if     (cvar.ne.cvarin) then
+        write(lp,*) 
+        write(lp,*) 'error in blkini - input ',cvarin,
+     +                      ' but should be ',cvar
+        write(lp,*) 
+        call flush(lp)
+        stop
+      endif
+      return
+ 6000 format('blkini: ',a6,' =',i6)
+#endif
+#endif
+      end subroutine grid_lonlat
+#DECK mod_xc.F
+      module mod_xc
+      implicit none
+c
+c --- HYCOM communication interface.
+c --- A subset of the serial interface for setup only.
+c
+c --- tital array dimensions
+      integer, public, save :: idm,jdm
+c
+c --- halo size always zero for setup
+      integer    nbdy
+      parameter (nbdy=0)
+c
+c --- line printer unit (stdout)
+      integer        lp
+      common/linepr/ lp
+      save  /linepr/
+c
+c --- tile number (counting from 1)
+      integer, public, save :: mnproc
+c
+c --- xcsync stdout flushing options
+      logical, public, parameter :: flush_lp=.true.,
+     &                              no_flush=.false.
+c
+c --- private timer variables, see xctmri
+      character*6, private, dimension(97), save :: cc
+      integer,     private, dimension(97), save :: nc
+      real*8,      private, dimension(97), save :: tc,t0
+c
+c --- actual module subroutines
+      contains
+
+      subroutine xcspmd
+      implicit none
+c
+c**********
+c*
+c  1) initialize data structures that identify the domain and tiles.
+c
+c  2) data structures:
+c      idm     -     1st total array dimension
+c      jdm     -     2nd total array dimension
+c      mnproc  -     1-D node index
+c
+c  3) Total array dimensions from regional.grid.b
+c*
+c**********
+c
+      character cvarin*6
+c
+c     shared memory version, mnproc=1.
+c
+      mnproc = 1
+      lp     = 6
+c
+c     total array dimensions from regional.grid.b
+c
+      !open(unit=11,file='regional.grid.b',form='formatted',
+#ifdef hycom_072
+      open(unit=11,file='/data1/GRIDS/DATA/input_072/regional.grid.b',
+     &     form='formatted',
+     &     status='old',action='read')
+#endif
+#ifdef hycom_024
+      open(unit=11,file='/data1/GRIDS/DATA/input_024/regional.grid.b',
+     &     form='formatted',
+     &     status='old',action='read')
+#endif
+#ifdef hycom_008
+      open(unit=11,file='/data1/GRIDS/DATA/input_008/regional.grid.b',
+     &     form='formatted',
+     &     status='old',action='read')
+#endif
+c
+      read( 11,*) idm,cvarin
+      if (cvarin.ne.'idm   ') then
+        write(lp,*)
+        write(lp,*) 'error in xcspmd - regional.grid.b input ',cvarin,
+     &                        ' but should be idm   '
+        write(lp,*)
+        stop
+      endif
+      read( 11,*) jdm,cvarin
+      if (cvarin.ne.'jdm   ') then
+        write(lp,*)
+        write(lp,*) 'error in xcspmd - regional.grid.b input ',cvarin,
+     &                        ' but should be jdm   '
+        write(lp,*)
+        call flush(lp)
+        stop
+      endif
+c
+      write(lp,'(/ a,2i5 /)') 'xcspmd: idm,jdm =',idm,jdm
+c
+      close(unit=11)
+c
+c     initialize timers.
+c
+      call xctmri
+      return
+      end subroutine xcspmd
+
+      subroutine xcstop(cerror)
+      implicit none
+c
+      character*(*), intent(in) :: cerror
+c
+c**********
+c*
+c  1) stop all processes.
+c
+c  2) all processes must call this routine.
+c     use 'xchalt' for emergency stops.
+c
+c  3) parameters:
+c       name            type         usage            description
+c    ----------      ----------     -------  ----------------------------
+c    cerror          char*(*)       input     error message
+c*
+c**********
+c
+c     print active timers.
+c
+      call xctmrp
+c
+c     shared memory version, just stop.
+c
+      if     (cerror.ne.' ') then
+        write(lp,*) '**************************************************'
+        write(lp,*) cerror
+        write(lp,*) '**************************************************'
+        call flush(lp)
+      endif
+      stop '(xcstop)'
+      end subroutine xcstop
+
+      subroutine xcsync(lflush)
+      implicit none
+c
+      logical, intent(in) :: lflush
+c
+c**********
+c*
+c  1) barrier, no processor exits until all arrive (and flush stdout).
+c
+c  2) some MPI implementations only flush stdout as a collective
+c     operation, and hence the lflush=.true. option to flush stdout.
+c
+c  3) Only one processor, so the barrier is a no-op in this case.
+c*
+c**********
+c
+      if     (lflush) then
+        call flush(lp)
+      endif
+      return
+      end subroutine xcsync
+
+      subroutine xctmri
+      implicit none
+c
+c
+c**********
+c*
+c  1) initialize timers.
+c
+c  2) timers  1:32 are for message passing routines,
+c     timers 33:80 are for general hycom routines,
+c     timers 81:96 are for user selected routines.
+c     timer     97 is the total time.
+c
+c  3) call xctmri    to initialize timers (called in xcspmd),
+c     call xctmr0(n) to start timer n,
+c     call xctmr1(n) to stop  timer n and add event to timer sum,
+c     call xctnrn(n,cname) to register a name for timer n,
+c     call xctmrp to printout timer statistics (called by xcstop).
+c*
+c**********
+c
+      integer i
+c
+      real*8     zero8
+      parameter (zero8=0.0)
+c
+      do 110 i= 1,97
+        cc(i) = '      '
+        nc(i) = 0
+        tc(i) = zero8
+  110 continue
+c
+      call xctmrn(97,'total ')
+      call xctmr0(97)
+      return
+      end subroutine xctmri
+
+      subroutine xctmr0(n)
+      implicit none
+c
+      integer, intent(in) :: n
+c
+c**********
+c*
+c  1) start timer n.
+c
+c  2) parameters:
+c       name            type         usage            description
+c    ----------      ----------     -------  ----------------------------
+c    n               integer        input     timer number
+c*
+c**********
+c
+      real*8 wtime
+c
+#if defined(DEBUG_TIMER)
+      if     (n.gt.24 .and. cc(n).ne.'      ') then
+        write(lp,*) 'call ',cc(n)
+        call flush(lp)
+      endif
+#endif
+      t0(n) = wtime()
+      return
+      end subroutine xctmr0
+
+      subroutine xctmr1(n)
+      implicit none
+c
+      integer, intent(in) :: n
+c
+c**********
+c*
+c  1) add time since call to xctim0 to timer n.
+c
+c  2) parameters:
+c       name            type         usage            description
+c    ----------      ----------     -------  ----------------------------
+c    n               integer        input     timer number
+c*
+c**********
+c
+      real*8  wtime
+c
+      nc(n) = nc(n) + 1
+      tc(n) = tc(n) + (wtime() - t0(n))
+#if defined(DEBUG_TIMER)
+      if     (n.gt.24 .and. cc(n).ne.'      ') then
+        write(lp,*) 'exit ',cc(n)
+        call flush(lp)
+      endif
+#endif
+      return
+      end subroutine xctmr1
+
+      subroutine xctmrn(n,cname)
+      implicit none
+c
+      character*6, intent(in) :: cname
+      integer,     intent(in) :: n
+c
+c**********
+c*
+c  1) register name of timer n.
+c
+c  2) parameters:
+c       name            type         usage            description
+c    ----------      ----------     -------  ----------------------------
+c    n               integer        input     timer number
+c    cname           char*(8)       input     timer name
+c*
+c**********
+c
+      cc(n) = cname
+      return
+      end subroutine xctmrn
+
+      subroutine xctmrp
+      implicit none
+c
+c**********
+c*
+c  1) print all active timers.
+c
+c  2) on exit all timers are reset to zero.
+c*
+c**********
+c
+      integer i
+c
+      real*8     zero8
+      parameter (zero8=0.0)
+c
+c     get total time.
+c
+      call xctmr1(97)
+c
+c     print timers.
+c
+      write(lp,6000)
+      do i= 1,97
+        if     (nc(i).ne.0) then
+          if     (cc(i).ne.'      ') then
+            write(lp,6100) cc(i),nc(i),tc(i),tc(i)/nc(i)
+          else
+            write(lp,6150)    i, nc(i),tc(i),tc(i)/nc(i)
+          endif
+        endif
+      enddo
+      write(lp,6200)
+      call flush(lp)
+c
+c     reset timers to zero.
+c
+      do i= 1,97
+        nc(i) = 0
+        tc(i) = zero8
+      enddo
+c
+c     start a new total time measurement.
+c
+      call xctmr0(97)
+      return
+c
+ 6000 format(/ /
+     +    4x,' timer statistics ' /
+     +    4x,'------------------' /)
+ 6100 format(5x,a6,
+     +   '   calls =',i9,
+     +   '   time =',f11.5,
+     +   '   time/call =',f14.8)
+ 6150 format(5x,'   #',i2,
+     +   '   calls =',i9,
+     +   '   time =',f11.5,
+     +   '   time/call =',f14.8)
+ 6200 format(/ /)
+      end subroutine xctmrp
+
+      end module mod_xc
+#DECK mod_za.F
+      module mod_za
+      use mod_xc  ! HYCOM communication API
+      use param
+c
+      implicit none
+c
+c --- HYCOM I/O interface.
+c --- Serial version, for setup only.
+c
+      integer, save, private              :: iarec(999)
+      real*4,  save, private, allocatable :: w(:)
+c
+c     n2drec = size of output 2-d array, multiple of 4096
+c     spval  = data void marker, 2^100 or about 1.2676506e30
+c
+      integer, save, private              :: n2drec
+      real*4,        private, parameter   :: spval=2.0**100
+c
+      private zaiordd,zaiowrd
+
+      contains
+
+c
+c-----------------------------------------------------------------------
+c
+c     machine dependent I/O routines.
+c     single processor version, contained in mod_za.
+c
+c     author:  Alan J. Wallcraft,  NRL.
+c
+c-----------------------------------------------------------------------
+c
+      subroutine zaiopn(cstat, iaunit)
+      implicit none
+c
+      integer,       intent(in)    :: iaunit
+      character*(*), intent(in)    :: cstat
+c
+c**********
+c*
+c  1) machine specific routine for opening a file for array i/o.
+c
+c     must call zaiost before first call to zaiopn.
+c     see also 'zaiope' and 'zaiopf'.
+c
+c  2) the filename is taken from the environment variable FORxxxA,
+c       where xxx = iaunit, with default fort.xxxa.
+c
+c     array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     cstat indicates the file type, it can be 'scratch', 'old', or
+c      'new'.
+c     all i/o to iaunit must be performed by zaiord and zaiowr.
+c     the file should be closed using zaiocl.
+c*
+c**********
+c
+      integer   ios,nrecl
+      character cfile*256,cenv*7
+      character cact*9
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+c     test file state.
+c
+      if     (iarec(iaunit).ne.-1) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+c     get filename.
+c
+      write(cenv,1000) iaunit
+      cfile = ' '
+      call getenv(cenv,cfile)
+      if     (cfile.eq.' ') then
+        write(cfile,1100) iaunit
+      endif
+*     write(6,*) 'zaiopn - iaunit = ',iaunit
+*     call flush(6)
+c
+c     open file.
+c
+      inquire(iolength=nrecl) w
+c
+      if     (cstat.eq.'OLD' .or.
+     &        cstat.eq.'old'     ) then
+        cact = 'READ'
+      elseif (cstat.eq.'NEW' .or.
+     &        cstat.eq.'new'     ) then
+        cact = 'WRITE'
+      else
+        cact = 'READWRITE'
+      endif
+#if defined(YMP)
+      if     (mod(nrecl,16384).eq.0 .and. nrecl.gt.16384*4) then
+       call asnunit(iaunit+1000,'-F syscall -N ieee',ios)
+      else
+        call asnunit(iaunit+1000,'-F cachea:8:16:2 -N ieee',ios)
+      endif
+      if     (ios.ne.0) then
+        write(6,9050) iaunit
+        write(6,*) 'ios = ',ios
+        call flush(6)
+        stop
+      endif
+#endif
+      if     (cstat.eq.'scratch' .or.
+     &        cstat.eq.'SCRATCH'     ) then
+        open(unit=iaunit+1000,             
+     &       form='unformatted', status='scratch',
+     &       access='direct', recl=nrecl, action=cact, iostat=ios)
+      else
+        open(unit=iaunit+1000, file=cfile, 
+     &       form='unformatted', status=cstat,
+     &       access='direct', recl=nrecl, action=cact, iostat=ios)
+      endif
+      if     (ios.ne.0) then
+        write(6,9100) iaunit
+        write(6,*) 'ios = ',ios
+        call flush(6)
+        stop
+      endif
+      iarec(iaunit) = 0
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 1000 format('FOR',i3.3,'A')
+ 1100 format('fort.',i3.3,'a')
+ 9000 format(/ /10x,'error in zaiopn -  array I/O unit ',
+     &   i3,' is not marked as available.'/ /)
+#if defined(YMP)
+ 9050 format(/ /10x,'error in zaiopn -  can''t asnunit ',i3,
+     &   ', for array I/O.'/ /)
+#endif
+ 9100 format(/ /10x,'error in zaiopn -  can''t open unit ',i3,
+     &   ', for array I/O.'/ /)
+      end subroutine zaiopn
+
+      subroutine zaiope(cenv,cstat, iaunit)
+      implicit none
+c
+      integer,       intent(in)    :: iaunit
+      character*(*), intent(in)    :: cenv,cstat
+c
+c**********
+c*
+c  1) machine specific routine for opening a file for array i/o.
+c
+c     must call zaiost before first call to zaiope.
+c     see also 'zaiopn' and 'zaiopf'.
+c
+c  2) the filename is taken from environment variable 'cenv'.
+c
+c     array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     cstat indicates the file type, it can be 'scratch', 'old', or
+c      'new'.
+c     all i/o to iaunit must be performed by zaiord and zaiowr.
+c      arrays passed to these routines must conform to 'h'.
+c     the file should be closed using zaiocl.
+c*
+c**********
+c
+      integer   ios,nrecl
+      character cfile*256
+      character cact*9
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+c     test file state.
+c
+      if     (iarec(iaunit).ne.-1) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+c     get filename.
+c
+      cfile = ' '
+      call getenv(cenv,cfile)
+      if     (cfile.eq.' ') then
+        write(6,9300) cenv(1:len_trim(cenv))
+        write(6,*) 'iaunit = ',iaunit
+        call flush(6)
+        stop
+      endif
+c
+c     open file.
+c
+*     write(6,*) 'zaiope - iaunit = ',iaunit
+*     call flush(6)
+*
+      inquire(iolength=nrecl) w
+c
+      if     (cstat.eq.'OLD' .or.
+     &        cstat.eq.'old'     ) then
+        cact = 'READ'
+      elseif (cstat.eq.'NEW' .or.
+     &        cstat.eq.'new'     ) then
+        cact = 'WRITE'
+      else
+        cact = 'READWRITE'
+      endif
+c
+#if defined(YMP)
+      if     (mod(nrecl,16384).eq.0 .and. nrecl.gt.16384*4) then
+       call asnunit(iaunit+1000,'-F syscall -N ieee',ios)
+      else
+        call asnunit(iaunit+1000,'-F cachea:8:16:2 -N ieee',ios)
+      endif
+      if     (ios.ne.0) then
+        write(6,9050) iaunit,cfile(1:len_trim(cfile))
+        write(6,*) 'ios = ',ios
+        write(6,*) 'cenv = ',cenv(1:len_trim(cenv))
+        call flush(6)
+        stop
+      endif
+#endif
+      open(unit=iaunit+1000, file=cfile, 
+     &     form='unformatted', status=cstat,
+     &     access='direct', recl=nrecl, action=cact, iostat=ios)
+      if     (ios.ne.0) then
+        write(6,9100) iaunit,cfile(1:len_trim(cfile))
+        write(6,*) 'ios  = ',ios
+        write(6,*) 'cenv = ',cenv(1:len_trim(cenv))
+        call flush(6)
+        stop
+      endif
+      iarec(iaunit) = 0
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiope -  array I/O unit ',
+     &   i3,' is not marked as available.'/ /)
+#if defined(YMP)
+ 9050 format(/ /10x,'error in zaiope -  can''t asnunit ',i3,
+     &   ', for array I/O.' /
+     &   10x,'cfile = ',a/ /)
+#endif
+ 9100 format(/ /10x,'error in zaiope -  can''t open unit ',i3,
+     &   ', for array I/O.' /
+     &   10x,'cfile = ',a/ /)
+ 9300 format(/ /10x,'error in zaiope -  environment variable ',a,
+     &   ' not defined'/ /)
+      end subroutine zaiope
+
+      subroutine zaiopf(cfile,cstat, iaunit)
+      implicit none
+c
+      integer,       intent(in)    :: iaunit
+      character*(*), intent(in)    :: cfile,cstat
+c
+c**********
+c*
+c  1) machine specific routine for opening a file for array i/o.
+c
+c     must call zaiost before first call to zaiopf.
+c     see also 'zaiopn' and 'zaiope'.
+c
+c  2) the filename is taken from 'cfile'.
+c
+c     array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     cstat indicates the file type, it can be 'scratch', 'old', or
+c      'new'.
+c     all i/o to iaunit must be performed by zaiord and zaiowr.
+c      arrays passed to these routines must conform to 'h'.
+c     the file should be closed using zaiocl.
+c*
+c**********
+c
+      integer   ios,nrecl
+      character cact*9
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+c     test file state.
+c
+      if     (iarec(iaunit).ne.-1) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+c     open file.
+c
+*     write(6,*) 'zaiopf - iaunit = ',iaunit
+*     call flush(6)
+*
+      inquire(iolength=nrecl) w
+c
+      if     (cstat.eq.'OLD' .or.
+     &        cstat.eq.'old'     ) then
+        cact = 'READ'
+      elseif (cstat.eq.'NEW' .or.
+     &        cstat.eq.'new'     ) then
+        cact = 'WRITE'
+      else
+        cact = 'READWRITE'
+      endif
+c
+#if defined(YMP)
+      if     (mod(nrecl,16384).eq.0 .and. nrecl.gt.16384*4) then
+       call asnunit(iaunit+1000,'-F syscall -N ieee',ios)
+      else
+        call asnunit(iaunit+1000,'-F cachea:8:16:2 -N ieee',ios)
+      endif
+      if     (ios.ne.0) then
+        write(6,9050) iaunit,cfile(1:len_trim(cfile))
+        write(6,*) 'ios   = ',ios
+        call flush(6)
+        stop
+      endif
+#endif
+      open(unit=iaunit+1000, file=cfile, 
+     &     form='unformatted', status=cstat,
+     &     access='direct', recl=nrecl, action=cact, iostat=ios)
+      if     (ios.ne.0) then
+        write(6,9100) iaunit,cfile(1:len_trim(cfile))
+        write(6,*) 'ios  = ',ios
+        call flush(6)
+        stop
+      endif
+      iarec(iaunit) = 0
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiopf -  array I/O unit ',
+     &   i3,' is not marked as available.'/ /)
+#if defined(YMP)
+ 9050 format(/ /10x,'error in zaiopf -  can''t asnunit ',i3,
+     &   ', for array I/O.' /
+     &   10x,'cfile = ',a/ /)
+#endif
+ 9100 format(/ /10x,'error in zaiopf -  can''t open unit ',i3,
+     &   ', for array I/O.' /
+     &   10x,'cfile = ',a/ /)
+      end subroutine zaiopf
+
+      subroutine zaiopi(lopen, iaunit)
+      implicit none
+c
+      logical, intent(out)   :: lopen
+      integer, intent(in)    :: iaunit
+c
+c**********
+c*
+c  1) is an array i/o unit open?
+c
+c  2) must call zaiost before first call to zaiopi.
+c*
+c**********
+c
+      lopen = iarec(iaunit).ne.-1
+      return
+      end subroutine zaiopi
+
+      subroutine zaiost
+      implicit none
+c
+c**********
+c*
+c  1) machine specific routine for initializing array i/o.
+c
+c  2) see also zaiopn, zaiord, zaiowr, and zaiocl.
+c*
+c**********
+c
+c     n2drec = size of output 2-d array, multiple of 4096
+c
+      n2drec = ((idm*jdm+4095)/4096)*4096
+c
+c     initialize I/O buffer
+c
+      allocate( w(n2drec) )
+c
+c     initialize record counters
+c
+      iarec(:) = -1
+#if defined(TIMER)
+c
+c     initialize timers.
+c
+      call xctmrn(16,'zaio**')
+      call xctmrn(17,'zaiord')
+      call xctmrn(18,'zaiowr')
+#endif
+      return
+      end subroutine zaiost
+
+      subroutine zaiocl(iaunit)
+      implicit none
+c
+      integer, intent(in)    :: iaunit
+c
+c**********
+c*
+c  1) machine specific routine for array i/o file closing.
+c
+c     must call zaiopn for this array unit before calling zaiocl.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c*
+c**********
+c
+      integer ios
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+*     write(6,*) 'zaiocl - iaunit = ',iaunit
+*     call flush(6)
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      close(unit=iaunit+1000, status='keep')
+#if defined(T3E) || defined(YMP) || defined(X1)
+      call asnunit(iaunit+1000,'-R',ios)
+#endif
+      iarec(iaunit) = -1
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiocl -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+      end subroutine zaiocl
+
+      subroutine zaiofl(iaunit)
+      implicit none
+c
+      integer, intent(in)    :: iaunit
+c
+c**********
+c*
+c  1) machine specific routine for array i/o buffer flushing.
+c
+c     must call zaiopn for this array unit before calling zaiocl.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c*
+c**********
+c
+      integer   irlen
+      character cfile*256
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      inquire(unit=iaunit+1000, name=cfile, recl=irlen)
+      close(  unit=iaunit+1000, status='keep')
+      open(   unit=iaunit+1000, file=cfile, form='unformatted', 
+     &        access='direct', recl=irlen)
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiofl -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+      end subroutine zaiofl
+
+      subroutine zaiorw(iaunit)
+      implicit none
+c
+      integer, intent(in)    :: iaunit
+c
+c**********
+c*
+c  1) machine specific routine for array i/o file rewinding.
+c
+c     must call zaiopn for this array unit before calling zaiocl.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c*
+c**********
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      iarec(iaunit) = 0
+*     write(6,*) 'zaiorw - iaunit,rec = ',iaunit,iarec(iaunit)
+*     call flush(6)
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiorw -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+      end subroutine zaiorw
+
+      subroutine zaiord3(h, l, mask,lmask, hmin,hmax,  iaunit)
+      implicit none
+c
+      logical, intent(in)    :: lmask
+      integer, intent(in)    :: l,iaunit
+      integer, dimension (1:idm,1:jdm),
+     &         intent(in)    :: mask
+#if defined(REAL4)
+      real*4,  intent(out)   :: hmin(l),hmax(l)
+      real*4,  dimension (1:idm,1:jdm,l),
+     &         intent(out)   :: h
+#else
+      real,    intent(out)   :: hmin(l),hmax(l)
+      real,    dimension (1:idm,1:jdm,l),
+     &         intent(out)   :: h
+#endif
+c
+c**********
+c*
+c  1) machine specific routine for 3-d array reading.
+c
+c     must call zaiopn for this array unit before calling zaiord.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     the array, 'h',  must conform to that passed in the associated
+c      call to zaiopn.
+c
+c  4) hmin,hmax are returned as the minimum and maximum value in the 
+c     array, ignoring array elements set to 2.0**100.  
+c     if lmask==.true. the range is calculated only where mask.ne.0,
+c     with all other values unchanged in h on exit.  It is then an
+c     error if mask.ne.0 anywhere the input is 2.0**100.
+c*
+c**********
+c
+c     this version just calls zaiord l times.
+c
+      integer k
+c
+      do k= 1,l
+        call zaiord(h(1,1,k), mask,lmask,
+     &              hmin(k),hmax(k), iaunit)
+      enddo
+c
+      return
+      end subroutine zaiord3
+
+      subroutine zaiord(h, mask,lmask, hmin,hmax,  iaunit)
+      implicit none
+c
+      logical, intent(in)    :: lmask
+      integer, intent(in)    :: iaunit
+      integer, dimension (1:idm,1:jdm),
+     &         intent(in)    :: mask
+#if defined(REAL4)
+      real*4,  intent(out)   :: hmin,hmax
+      real*4,  dimension (1:idm,1:jdm),
+     &         intent(out)   :: h
+#else
+      real,    intent(out)   :: hmin,hmax
+      real,    dimension (1:idm,1:jdm),
+     &         intent(out)   :: h
+#endif
+c
+c**********
+c*
+c  1) machine specific routine for array reading.
+c
+c     must call zaiopn for this array unit before calling zaiord.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     the array, 'h',  must conform to that passed in the associated
+c      call to zaiopn.
+c
+c  4) hmin,hmax are returned as the minimum and maximum value in the 
+c     array, ignoring array elements set to 2.0**100.  
+c     if lmask==.true. the range is calculated only where mask.ne.0,
+c     with all other values unchanged in h on exit.  It is then an
+c     error if mask.ne.0 anywhere the input is 2.0**100.
+c*
+c**********
+c
+      integer   ios, i,j
+      real*4    wmin,wmax
+#if defined(TIMER)
+c
+      call xctmr0(17)
+#endif
+c
+*     write(6,*) 'zaiord - iaunit,rec = ',iaunit,iarec(iaunit)
+*     call flush(6)
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      iarec(iaunit) = iarec(iaunit) + 1
+      call zaiordd(w,n2drec, iaunit+1000,iarec(iaunit),ios)
+      if     (ios.ne.0) then
+        write(6,9100) iarec(iaunit),iaunit
+        write(6,*) 'ios = ',ios
+        call flush(6)
+        stop
+      endif
+      wmin =  spval 
+      wmax = -spval 
+      if     (lmask) then
+!$OMP   PARALLEL DO PRIVATE(j,i)
+!$OMP&              REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&           SCHEDULE(STATIC,jblk)
+        do j= 1,jdm
+          do i= 1,idm
+            if     (mask(i,j).ne.0) then
+              h(i,j) = w(i+(j-1)*idm)
+              wmin = min( wmin, w(i+(j-1)*idm) )
+              wmax = max( wmax, w(i+(j-1)*idm) )
+            endif
+          enddo
+        enddo
+        if     (wmax.eq.spval) then
+          write(6,9200) iarec(iaunit),iaunit
+          call flush(6)
+          stop
+        endif
+      else
+!$OMP   PARALLEL DO PRIVATE(j,i)
+!$OMP&              REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&           SCHEDULE(STATIC,jblk)
+        do j= 1,jdm
+          do i= 1,idm
+            h(i,j) = w(i+(j-1)*idm)
+            if     (w(i+(j-1)*idm).ne.spval) then
+              wmin = min( wmin, w(i+(j-1)*idm) )
+              wmax = max( wmax, w(i+(j-1)*idm) )
+            endif
+          enddo
+        enddo
+      endif
+      hmin = wmin
+      hmax = wmax
+c
+#if defined(TIMER)
+c
+      call xctmr1(17)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiord -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+ 9100 format(/ /10x,'error in zaiord -  can''t read record',
+     &   i4,' on array I/O unit ',i3,'.'/ /)
+ 9200 format(/ /10x,'error in zaiord -  record',
+     &   i4,' on array I/O unit ',i3,
+     &   ' has 2.0**100 outside masked region.'/ /)
+      end subroutine zaiord
+
+      subroutine zaiordd(a,n, iunit,irec,ios)
+      implicit none
+c
+      integer, intent(in)    :: n,iunit,irec
+      integer, intent(out)   :: ios
+      real*4,  intent(out)   :: a(n)
+c
+c**********
+c*
+c 1)  direct access read a single record.
+c
+c 2)  expressed as a subroutine because i/o with 
+c     implied do loops can be slow on some machines.
+c*
+c**********
+c
+      read(unit=iunit, rec=irec, iostat=ios) a
+#if defined(ENDIAN_IO)
+      call zaio_endian(a,n)
+#endif
+      return
+      end subroutine zaiordd
+
+      subroutine zaiosk(iaunit)
+      implicit none
+c
+      integer, intent(in)    :: iaunit
+c
+c**********
+c*
+c  1) machine specific routine for skipping an array read.
+c
+c     must call zaiopn for this array unit before calling zaiosk.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     the array, 'h',  must conform to that passed in the associated
+c      call to zaiopn.
+c*
+c**********
+#if defined(TIMER)
+c
+      call xctmr0(16)
+#endif
+c
+*     write(6,*) 'zaiosk - iaunit,rec = ',iaunit,iarec(iaunit)
+*     call flush(6)
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      iarec(iaunit) = iarec(iaunit) + 1
+#if defined(TIMER)
+c
+      call xctmr1(16)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiosk -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+      end subroutine zaiosk
+
+      subroutine zaiowr3(h, l, mask,lmask, hmin,hmax, iaunit, lreal4)
+      implicit none
+c
+      logical, intent(in)    :: lmask,lreal4
+      integer, intent(in)    :: l,iaunit
+      integer, dimension (1:idm,1:jdm),
+     &         intent(in)    :: mask
+#if defined(REAL4)
+      real*4,  intent(out)   :: hmin(l),hmax(l)
+      real*4,  dimension (1:idm,1:jdm,l),
+     &         intent(inout) :: h
+#else
+      real,    intent(out)   :: hmin(l),hmax(l)
+      real,    dimension (1:idm,1:jdm,l),
+     &         intent(inout) :: h
+#endif
+c
+c**********
+c*
+c  1) machine specific routine for 3-d array writing.
+c
+c     must call zaiopn for this array unit before calling zaiord.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     the array, 'h',  must conform to that passed in the associated
+c      call to zaiopn.
+c
+c  4) hmin,hmax are returned as the minimum and maximum value in the array.
+c     if lmask==.true. the range is only where mask.ne.0, with all other
+c     values output as 2.0**100.
+c
+c  5) If lreal4==.true. then h is overwritten on exit with real*4 version
+c     of the same array.  This is typically used for reproducability on
+c     restart.
+c*
+c**********
+c
+c     this version just calls zaiowr l times.
+c
+      integer k
+c
+      do k= 1,l
+        call zaiowr(h(1,1,k), mask,lmask,
+     &              hmin(k),hmax(k), iaunit, lreal4)
+      enddo
+      return
+      end subroutine zaiowr3
+
+      subroutine zaiowr(h, mask,lmask, hmin,hmax,  iaunit, lreal4)
+      implicit none
+c
+      logical, intent(in)    :: lmask,lreal4
+      integer, intent(in)    :: iaunit
+      integer, dimension (1:idm,1:jdm),
+     &         intent(in)    :: mask
+#if defined(REAL4)
+      real*4,  intent(out)   :: hmin,hmax
+      real*4,  dimension (1:idm,1:jdm),
+     &         intent(inout) :: h
+#else
+      real,    intent(out)   :: hmin,hmax
+      real,    dimension (1:idm,1:jdm),
+     &         intent(inout) :: h
+#endif
+c
+c**********
+c*
+c  1) machine specific routine for array writing.
+c
+c     must call zaiopn for this array unit before calling zaiord.
+c
+c  2) array i/o is fortran real*4 direct access i/o to unit iaunit+1000.
+c
+c  3) iaunit+1000 is the i/o unit used for arrays.  array i/o might not
+c      use fortran i/o units, but, for compatability, assume that
+c      iaunit+1000 refers to a fortran i/o unit anyway.
+c     the array, 'h',  must conform to that passed in the associated
+c      call to zaiopn.
+c
+c  4) hmin,hmax are returned as the minimum and maximum value in the array.
+c     if lmask==.true. the range is only where mask.ne.0, with all other
+c     values output as 2.0**100.
+c
+c  5) If lreal4==.true. then h is overwritten on exit with real*4 version
+c     of the same array.  This is typically used for reproducability on
+c     restart.
+c*
+c**********
+c
+      integer   ios, i,j
+      real*4    wmin,wmax
+#if defined(TIMER)
+c
+      call xctmr0(18)
+#endif
+c
+      if     (iarec(iaunit).lt.0) then
+        write(6,9000) iaunit
+        call flush(6)
+        stop
+      endif
+c
+      wmin =  spval
+      wmax = -spval
+      if     (lreal4) then
+        if     (lmask) then
+!$OMP     PARALLEL DO PRIVATE(j,i)
+!$OMP&                REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&             SCHEDULE(STATIC,jblk)
+          do j= 1,jdm
+            do i= 1,idm
+              if     (mask(i,j).ne.0) then
+                w(i+(j-1)*idm) = h(i,j)
+                wmin = min( wmin, w(i+(j-1)*idm) )
+                wmax = max( wmax, w(i+(j-1)*idm) )
+              else
+                w(i+(j-1)*idm) = spval
+              endif
+#if defined(REAL4)
+! ---         h(i,j) = w(i+(j-1)*idm)  ! h is already real*4
+#else
+              h(i,j) = w(i+(j-1)*idm)  ! h is not real*4, so update it
+#endif
+            enddo
+          enddo
+        else
+!$OMP     PARALLEL DO PRIVATE(j,i)
+!$OMP&                REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&             SCHEDULE(STATIC,jblk)
+          do j= 1,jdm
+            do i= 1,idm
+              w(i+(j-1)*idm) = h(i,j)
+              if     (w(i+(j-1)*idm).ne.spval) then
+                wmin = min( wmin, w(i+(j-1)*idm) )
+                wmax = max( wmax, w(i+(j-1)*idm) )
+              endif
+#if defined(REAL4)
+! ---         h(i,j) = w(i+(j-1)*idm)  ! h is already real*4
+#else
+              h(i,j) = w(i+(j-1)*idm)  ! h is not real*4, so update it
+#endif
+            enddo
+          enddo
+        endif
+      else
+        if     (lmask) then
+!$OMP     PARALLEL DO PRIVATE(j,i)
+!$OMP&                REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&             SCHEDULE(STATIC,jblk)
+          do j= 1,jdm
+            do i= 1,idm
+              if     (mask(i,j).ne.0) then
+                w(i+(j-1)*idm) = h(i,j)
+                wmin = min( wmin, w(i+(j-1)*idm) )
+                wmax = max( wmax, w(i+(j-1)*idm) )
+              else
+                w(i+(j-1)*idm) = spval
+              endif
+            enddo
+          enddo
+        else
+!$OMP     PARALLEL DO PRIVATE(j,i)
+!$OMP&                REDUCTION(MIN:wmin) REDUCTION(MAX:wmax)
+!$OMP&             SCHEDULE(STATIC,jblk)
+          do j= 1,jdm
+            do i= 1,idm
+              w(i+(j-1)*idm) = h(i,j)
+              if     (w(i+(j-1)*idm).ne.spval) then
+                wmin = min( wmin, w(i+(j-1)*idm) )
+                wmax = max( wmax, w(i+(j-1)*idm) )
+              endif
+            enddo
+          enddo
+        endif
+      endif
+      do i= idm*jdm+1,n2drec
+        w(i) = spval
+      enddo
+      hmin = wmin
+      hmax = wmax
+      iarec(iaunit) = iarec(iaunit) + 1
+      call zaiowrd(w,n2drec, iaunit+1000,iarec(iaunit),ios)
+      if     (ios.ne.0) then
+        write(6,9100) iarec(iaunit),iaunit
+        call flush(6)
+        stop
+      endif
+#if defined(TIMER)
+c
+      call xctmr1(18)
+#endif
+      return
+c
+ 9000 format(/ /10x,'error in zaiowr -  array I/O unit ',
+     &   i3,' is not marked as open.'/ /)
+ 9100 format(/ /10x,'error in zaiowr -  can''t write record',
+     &   i4,' on array I/O unit ',i3,'.'/ /)
+      end subroutine zaiowr
+
+      subroutine zaiowrd(a,n, iunit,irec,ios)
+      implicit none
+c
+      integer, intent(in)    :: n,iunit,irec
+      integer, intent(out)   :: ios
+      real*4,  intent(in)    :: a(n)
+c
+c**********
+c*
+c 1)  direct access write a single record.
+c
+c 2)  expressed as a subroutine because i/o with 
+c     implied do loops can be slow on some machines.
+c*
+c**********
+c
+#if defined(ENDIAN_IO)
+      call zaio_endian(a,n)  ! overwrites a
+#endif
+      write(unit=iunit, rec=irec, iostat=ios) a
+      return
+      end subroutine zaiowrd
+
+      end module mod_za
+
+#if defined(ENDIAN_IO)
+      subroutine zaio_endian(a,n)
+      implicit none
+c
+      integer,         intent(in)    :: n
+      integer(kind=4), intent(inout) :: a(n)  ! 4-bytes
+c
+c**********
+c*
+c 1)  swap the endian-ness of the array.
+c
+c 2)  assumes integer(kind=1) and integer(kind=4) ocupy one and four
+c     bytes respectively.
+c*
+c**********
+c
+      integer         k
+      integer(kind=4) ii4,   io4     ! 4-bytes
+      integer(kind=1) ii1(4),io1(4)  ! 1-byte
+      equivalence    (ii4,ii1(1)), (io4,io1(1))  ! non-standard f90
+c
+      do k= 1,n
+        ii4 = a(k)
+        io1(1) = ii1(4)
+        io1(2) = ii1(3)
+        io1(3) = ii1(2)
+        io1(4) = ii1(1)
+        a(k) = io4
+      enddo
+      return
+      end subroutine zaio_endian
+#endif /* ENDIAN_IO */
+#DECK param.F90
+module param
+
+  implicit none
+#ifdef hycom1deg
+  !Hycom 1deg grid
+  integer, parameter ::  ihycom =  360,  jhycom =  168
+
+  !real, parameter :: latbeg =  89.25
+  real, parameter :: latbeg =  -77.00
+  real, parameter :: lonbeg =   0.50
+#endif
+#ifdef hycom_024
+  !Hycom 0.25 grid (tripole)
+  integer, parameter ::  ihycom = 1500,  jhycom = 1100
+#endif
+#ifdef hycom_008
+  !Hycom 1/12 grid (tripole)
+  integer, parameter ::  ihycom = 4500,  jhycom = 3298
+#endif
+#ifdef hycom_072
+  !Hycom 1/12 grid (tripole)
+  integer, parameter ::  ihycom = 500,  jhycom = 382
+#endif
+ 
+  integer, parameter :: nvars =  1 &  !land
+                              +  4 &  !ip,iu,iv,iq
+                              +  1 &  !bathy
+                              + 18   
+
+end module param
+#DECK spherdist.F90
+      real*4 function spherdist(lon1,lat1,lon2,lat2)
+      implicit none
+      real, intent(in) :: lon1,lat1,lon2,lat2 ! Pos. in degrees
+!c
+!c --- ------------------------------------------------
+!c --- Computes the distance between geo. pos.
+!c --- lon1,lat1 and lon2,lat2. 
+!c --- input is in degrees.
+!c
+!c --- output is real*4 for better global consistancy,
+!c --- by truncating double precision roundoff errors.
+!c --- real*4 is not in f90, but is widely supported.
+!c
+!c --- Based on m_spherdist.F90 from Geir Evanson.
+!c --- ------------------------------------------------
+!c
+      double precision, parameter :: invradian=0.017453292d0
+      double precision, parameter ::    rearth=6371001.0d0  ! Radius of earth
+!c
+      double precision  dlon1,dlon2
+      double precision  rlon1,rlat1,rlon2,rlat2           ! Pos. in radians
+      double precision  x1,y1,z1,x2,y2,z2                 ! Cartesian position
+      double precision  dr                                ! Arc length
+!c
+!c     ensure that spherdist(ax,ay,bx,by) == spherdist(bx,by,ax,ay)
+!c
+      dlon1 = lon1
+      dlon1 = mod(dlon1,360.d0)
+      if     (dlon1.lt.0.d0) then
+        dlon1 = dlon1 + 360.d0
+      endif
+      dlon2 = lon2
+      dlon2 = mod(dlon2,360.d0)
+      if     (dlon2.lt.0.d0) then
+        dlon2 = dlon2 + 360.d0
+      endif
+      if     (lat1.lt.lat2) then
+        rlon1=dlon1*invradian            !lon1 in rad
+        rlat1=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon2=dlon2*invradian            !lon2 in rad
+        rlat2=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      elseif (lat1.eq.lat2 .and. dlon1.le.dlon2) then
+        rlon1=dlon1*invradian            !lon1 in rad
+        rlat1=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon2=dlon2*invradian            !lon2 in rad
+        rlat2=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      else
+        rlon2=dlon1*invradian            !lon1 in rad
+        rlat2=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon1=dlon2*invradian            !lon2 in rad
+        rlat1=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      endif
+!c
+      x1= sin(rlat1)*cos(rlon1)        !x,y,z of pos 1.
+      y1= sin(rlat1)*sin(rlon1)
+      z1= cos(rlat1) 
+!c
+      x2= sin(rlat2)*cos(rlon2)        !x,y,z of pos 2.
+      y2= sin(rlat2)*sin(rlon2)
+      z2= cos(rlat2) 
+!c
+      dr=acos(min(1.d0,x1*x2+y1*y2+z1*z2))  ! Arc length
+!c
+      spherdist=dr*rearth
+!c
+      end function spherdist
+#DECK wtime.F
+#if defined(MPI)
+      REAL*8 FUNCTION WTIME()
+      IMPLICIT NONE
+C
+C     USE THE MPI FUNCTION  MPI_WTIME  TO RETURN WALL TIME.
+C
+      DOUBLE PRECISION MPI_WTIME
+C
+      WTIME = MPI_WTIME()
+      RETURN
+C     END OF WTIME.
+      END
+#else
+      REAL*8 FUNCTION WTIME()
+      IMPLICIT NONE
+C
+C     USE THE F90 INTRINSIC  SYSTEM_CLOCK  TO RETURN WALL TIME.
+C
+C     WILL FAIL IF THE COUNT IS EVER NEGATIVE, BUT THE STANDARD
+C     SAYS THAT IT IS AWAYS NON-NEGATIVE IF A CLOCK EXISTS.
+C     NOT THREAD-SAFE, UNLESS LCOUNT AND IOVER ARE THREADPRIVATE.
+C
+      REAL*8     ZERO,ONE
+      PARAMETER (ZERO=0.0, ONE=1.0)
+C
+      INTEGER COUNT, MCOUNT, RATE
+C
+      REAL*8  OFFSEC, OFFSET, PERSEC
+      INTEGER ICOUNT, IOVER,  LCOUNT, NCOUNT
+      SAVE    OFFSEC, OFFSET, PERSEC
+      SAVE    ICOUNT, IOVER,  LCOUNT, NCOUNT
+C
+      DATA IOVER, LCOUNT / -1, -1 /
+C
+      CALL SYSTEM_CLOCK(COUNT)
+C
+      IF     (COUNT.LT.LCOUNT) THEN
+C
+C        COUNT IS SUPPOSED TO BE NON-DECREASING EXCEPT WHEN IT WRAPS,
+C        BUT SOME IMPLEMENTATIONS DON''T DO THIS.  SO IGNORE ANY
+C        DECREASE OF LESS THAN ONE PERCENT OF THE RANGE.
+C
+         IF     (LCOUNT-COUNT.LT.NCOUNT) THEN
+           COUNT  = LCOUNT
+         ELSE
+           IOVER  = IOVER + 1
+           OFFSET = OFFSET + OFFSEC
+         ENDIF
+      ENDIF
+      LCOUNT = COUNT
+C
+      IF     (IOVER.EQ.0) THEN
+C
+C       FIRST CYCLE, FOR ACCURACY WITH 64-BIT COUNTS.
+C
+         WTIME = (COUNT - ICOUNT) * PERSEC
+      ELSEIF (IOVER.GT.0) THEN
+C
+C        ALL OTHER CYCLES.
+C
+         WTIME = COUNT * PERSEC + OFFSET
+      ELSE
+C
+C        INITIALIZATION.
+C
+         CALL SYSTEM_CLOCK(ICOUNT, RATE, MCOUNT)
+         NCOUNT =  MCOUNT/100
+         PERSEC =  ONE/RATE
+         OFFSEC =  MCOUNT * PERSEC
+         OFFSET = -ICOUNT * PERSEC
+         IOVER  =  0
+         WTIME  =  ZERO
+      ENDIF
+      RETURN
+C     END OF WTIME.
+      END
+#endif  /* MPI:else */
+#DECK xhygrid.F90
+program xhygrid
+
+  use param
+  use cdf
+  use data
+  use field_defs
+  use mod_za    ! HYCOM array I/O interface
+  use mod_xc
+
+  implicit none
+ 
+     real :: xmin, xmax
+  integer :: i,j,ii,jj,jlast
+  integer :: reclen
+
+  integer(kind=4), dimension(0:ihycom,0:jhycom) :: xip
+
+  integer(kind=4), dimension(ihycom,jhycom) :: i2d
+     real(kind=4), dimension(ihycom,jhycom) :: a2d
+#ifdef hycom1deg
+  character(len=80) :: bathycdf
+  real(kind=8), dimension(ihycom,jhycom) :: bathy
+#else
+  real(kind=4), dimension(ihycom,jhycom) :: m2d
+
+  call xcspmd
+  call zaiost
+  lp=6
+
+  if(idm .ne. ihycom .or. jdm .ne. jhycom)stop
+  ip = 1
+
+  print *,idm,jdm
+  print *,ihycom,jhycom
+  inquire(iolength=reclen)m2d
+  print *,reclen,19*(reclen+2752),19*(reclen+11616)
+
+  ! size of regional.depth.a (single record) is 6602752; 
+  ! reclen=6600000; offset of some sort 2752
+  ! size of regional.grid.a (19 records) is 125452288
+  ! ==>19*(reclen+2752)
+  ! for the 1/12 degree grid, regional.depth.a is 59375616
+  ! reclen=59364000; offset of some sort 11616
+  ! size of regional.grid.a (19 records) is 1128136704
+  ! ==>19*(59364000+11616) 
+#endif
+  ! set up the variable attributes for netcdf file
+  call fieldatts_setup
+ 
+  call setup_cdf
+#ifdef hycom1deg
+  ! regular grid 1deg
+  plat(:,1) = latbeg
+  plon(1,:) = 0.5
+
+  ! set up grid
+  do j = 2,jhycom
+   !plat(:,j) = plat(:,1) - 1.0*float(j-1)
+   plat(:,j) = plat(:,1) + 1.0*float(j-1)
+  enddo
+  do i = 2,ihycom
+   plon(i,:) = plon(1,:) + 1.0*float(i-1)
+  enddo
+  print *,plon(1,1),plon(ihycom,1)
+  print *,plat(1,1),plat(1,jhycom)
+
+  ! get the bathy 
+  bathycdf = '/data1/GRIDS/hycom_bathy_1deg.nc'
+  rc = nf90_open(trim(bathycdf), nf90_nowrite, ncid)
+  print *,'getting bathy from ',trim(bathycdf),trim(nf90_strerror(rc))
+
+  rc = nf90_inq_varid(ncid, 'bathy', datid)
+  rc = nf90_get_var(ncid, datid,     bathy)
+  rc = nf90_close(ncid)
+
+  depths = real(bathy,4)
+  depths(:,1) = 0.0
+  where(depths .lt. 0.0)depths = 0.0
+
+                          land = 1
+   where(depths .eq.  0.0)land = 0
+
+  ! hycom horizontal grid routine
+  call grid_lonlat
+#else
+  ! hycom horizontal grid
+#ifdef hycom_024
+   call zaiopf('/data1/GRIDS/DATA/input_024/regional.grid.a', 'OLD', 21)
+#endif
+#ifdef hycom_008
+   call zaiopf('/data1/GRIDS/DATA/input_008/regional.grid.a', 'OLD', 21)
+#endif
+   ! lat/lon at P,Q,U,V grids
+   call zaiord(plon,ip,.false., xmin,xmax, 21)
+   call zaiord(plat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qlon,ip,.false., xmin,xmax, 21)
+   call zaiord(qlat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(ulon,ip,.false., xmin,xmax, 21)
+   call zaiord(ulat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vlon,ip,.false., xmin,xmax, 21)
+   call zaiord(vlat,ip,.false., xmin,xmax, 21)
+   ! angle between p grid and geolat,geolon
+   call zaiord(pang,ip,.false., xmin,xmax, 21)
+
+   ! grid spacing in meters of all 4 grids
+   call zaiord(pscx,ip,.false., xmin,xmax, 21)
+   call zaiord(pscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qscx,ip,.false., xmin,xmax, 21)
+   call zaiord(qscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(uscx,ip,.false., xmin,xmax, 21)
+   call zaiord(uscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vscx,ip,.false., xmin,xmax, 21)
+   call zaiord(vscy,ip,.false., xmin,xmax, 21)
+
+   ! coriolis
+   call zaiord(cori,ip,.false., xmin,xmax, 21)
+
+   call zaiocl(21)
+   print *,'closing regional.grid.a'
+#ifdef test
+   !do i = 370,380
+   do i = 1120,1130
+    print *,i,qlat(i,jdm),qlon(i,jdm)
+   enddo
+   print *
+   !do i = 1120,1130
+   do i = 3370,3380
+    print *,i,qlat(i,jdm),qlon(i,jdm)
+   enddo
+
+   i = 376; j = 1100
+   print *,vlon(i,j),vlat(i,j)
+   i = 1126; j = 1100
+   print *,vlon(i,j),vlat(i,j)
+#endif
+
+   ! hycom bathymetry
+
+#ifdef hycom_072
+   call zaiopf('/data1/GRIDS/DATA/input_072/regional.depth.a', 'OLD', 22)
+#endif
+#ifdef hycom_024
+   call zaiopf('/data1/GRIDS/DATA/input_024/regional.depth.a', 'OLD', 22)
+#endif
+#ifdef hycom_008
+   call zaiopf('/data1/GRIDS/DATA/input_008/regional.depth.a', 'OLD', 22)
+#endif
+   call zaiord(depths,ip,.false., xmin,xmax, 22)
+   call zaiocl(22)
+   print *,'closing regional.depth.a'
+
+   print *,xmin,xmax
+                          land = 1
+   where(depths .gt. xmax)land = 0
+   where(depths .gt. xmax)depths = 0.0
+
+   !do i = 1,ihycom
+   ! write(20,*)j,pang(i,1099),pang(i,1100)
+   !enddo
+#endif
+! Following code from bigrid.f ln 216
+!c --- u,v points are located halfway between any 2 adjoining mass points
+!c --- 'interior' q points require water on all 4 sides.
+!c --- 'promontory' q points require water on 3 (or at least 2
+!c --- diametrically opposed) sides
+
+      xip = 0
+       ip = 0; iu = 0; iv = 0; iq = 0
+     do j = 1,jhycom
+      do i = 1,ihycom
+       if(depths(i,j) .gt. 0.)then
+         ip(i,j) = 1
+        xip(i,j) = 1
+       endif
+      enddo
+     enddo
+     ! set xip consistent w/ closed southern boundary, periodic eastern
+     xip(:,0) = xip(:,1)
+     xip(0,:) = xip(1,:)    
+
+      do j=1,jhycom
+        do i=1,ihycom
+          if (xip(i-1,j).gt.0.and.xip(i,j).gt.0) then
+            iu(i,j)=1
+          endif
+          if (xip(i,j-1).gt.0.and.xip(i,j).gt.0) then
+            iv(i,j)=1
+          endif
+          if (min(xip(i,j),xip(i-1,j),xip(i,j-1),xip(i-1,j-1)).gt.0) then
+            iq(i,j)=1
+          elseif ((xip(i  ,j).gt.0.and.xip(i-1,j-1).gt.0).or. &
+                  (xip(i-1,j).gt.0.and.xip(i  ,j-1).gt.0)    ) then
+            iq(i,j)=1
+          endif
+        enddo
+      enddo
+
+! write the netCDF file
+  pang(:,jhycom) = pang(:,jhycom-1)
+#ifdef add_extra_row
+  jlast = jhycom
+#else
+  jlast = jhycom-1
+#endif
+#ifdef test
+  a2d = 0.0
+  call extract2d('land', jlast,a2d,land)
+  call extract2d(  'ip', jlast,a2d,  ip)
+  call extract2d(  'iu', jlast,a2d,  iu)
+  call extract2d(  'iv',jhycom,a2d,  iv)
+  call extract2d(  'iq',jhycom,a2d,  iq)
+
+  i2d = 0.0
+  call extract2d('bathy', jlast,depths,i2d)
+
+  call extract2d( 'plat', jlast,plat,i2d)
+  call extract2d( 'plon', jlast,plon,i2d)
+
+  call extract2d( 'ulat', jlast,ulat,i2d)
+  call extract2d( 'ulon', jlast,ulon,i2d)
+
+  call extract2d( 'pscx', jlast,pscx,i2d)
+  call extract2d( 'pscy', jlast,pscy,i2d)
+
+  call extract2d( 'uscx', jlast,uscx,i2d)
+  call extract2d( 'uscy', jlast,uscy,i2d)
+
+  call extract2d( 'pang', jlast,pang,i2d)
+  call extract2d( 'cori', jlast,cori,i2d)
+
+  call extract2d( 'qlat',jhycom,qlat,i2d)
+  call extract2d( 'qlon',jhycom,qlon,i2d)
+
+  call extract2d( 'vlat',jhycom,vlat,i2d)
+  call extract2d( 'vlon',jhycom,vlon,i2d)
+
+  call extract2d( 'qscx',jhycom,qscx,i2d)
+  call extract2d( 'qscy',jhycom,qscy,i2d)
+
+  call extract2d( 'vscx',jhycom,vscx,i2d)
+  call extract2d( 'vscy',jhycom,vscy,i2d)
+#endif !test
+
+end program XHygrid
+#DECK zh.F
+#if defined(T3E)
+# include "zh_t3e.f"
+#elif defined(YMP)
+# include "zh_ymp.f"
+#elif defined(X1)
+# include "zh_x1.f"
+#elif defined(HPUX)
+# include "zh_hp.f"
+#else
+# include "zh_sun.f"
+#endif
+# if defined(AIX)
+      subroutine flush(iunit)
+      implicit none
+      integer iunit
+c
+c --- wrapper for flush system call under AIX.
+c
+      call flush_(iunit)
+      return
+      end
+#endif
+# if defined(OSX)
+      subroutine flush(iunit)
+      implicit none
+      integer iunit
+c
+c --- wrapper for flush system call under OSX.
+c
+      call flush_(iunit)
+      return
+      end
+
+      subroutine fdate(stm)
+      implicit none
+      character*24 stm
+c
+c --- wrapper for fdate (SunOS) system call under OSX.
+c --- An example of SunOS fdate output is: "Mon Aug 1 09:24:21 1994".
+c
+      character*26 str
+c
+      call fdate_(str)
+      stm = str(1:24)
+      return
+      end
+
+      real*4 function etime(time)
+      implicit none
+      real*4 time(2)
+c
+c --- wrapper for etime (SunOS) function system call under OSX.
+c
+      real(4) etime_
+      type tb_type
+        sequence
+        real(4) usrtime
+        real(4) systime
+      end type
+      type (tb_type) etime_struct
+c
+      etime   = etime_(etime_struct)
+      time(1) = etime_struct%usrtime
+      time(2) = etime_struct%systime
+      return
+      end
+#endif

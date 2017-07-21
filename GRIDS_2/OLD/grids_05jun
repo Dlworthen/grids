@@ -1,0 +1,1189 @@
+#DECK cdf.F90
+module cdf
+
+  use param
+  use field_defs
+  use netcdf
+
+  implicit none
+
+  integer, parameter :: ndim1 = 1, ndim2 = 2, ndim3 = 3, ndim4 = 4
+
+  integer, dimension(ndim1) :: dim1, corner1, edge1
+  integer, dimension(ndim2) :: dim2, corner2, edge2
+  integer, dimension(ndim3) :: dim3, corner3, edge3
+  integer, dimension(ndim4) :: dim4, corner4, edge4
+
+  character(len=20) :: dirout = '/data1/GRIDS/'
+  !character(len=20) :: dirout = '/data1/TEST/'
+
+#ifdef add_extra_row
+  character(len=8) :: csrc = '_xrow.nc'
+#else
+  character(len=8) :: csrc = '.nc     '
+#endif
+#ifdef hycom1deg
+  character(len=60) :: gridcdf = 'kiss1deg_grid'
+#else
+# ifdef hycom2cice
+  character(len=60) :: gridcdf = 'cice024_grid'
+# else
+  character(len=60) :: gridcdf = 'kiss024_grid'
+# endif
+#endif
+
+  real(kind=8) :: mval = -9999.
+
+  integer :: rc,ncid
+  integer :: xdim, ydim, ymdim, datid
+
+  contains
+   
+  !-----------------------------------------------------------------------------
+   
+  subroutine setup_cdf
+
+            integer :: ii
+  character(len=12) :: vname, vunit, stggr
+  character(len=60) :: vlong
+  character(len=60) :: outcdf
+
+  outcdf = trim(dirout)//trim(gridcdf)//trim(csrc)
+  print *,trim(outcdf)
+
+  rc = nf90_create(trim(outcdf), nf90_clobber, ncid)
+  rc = nf90_def_dim(ncid, 'ni',   ihycom,    xdim)
+  rc = nf90_def_dim(ncid, 'nj',   jhycom,    ydim)
+  rc = nf90_def_dim(ncid, 'njm1', jhycom-1, ymdim)
+
+     ii = 0
+#ifndef hycom2cice
+  ! land+masks (ip,iq,iu,iv,land)
+  do ii = 1,5 
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+#ifdef add_extra_row
+    dim2(2) =  ydim
+#else
+    dim2(2) = ymdim
+#endif
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+   rc = nf90_def_var(ncid, vname,    nf90_int,  dim2,  datid)
+   rc = nf90_put_att(ncid, datid,            'units',  vunit)
+   rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+  enddo
+#endif
+  do ii = ii+1,nvars
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+#ifdef hycom2cice
+    dim2(2) = ymdim
+    dim2(1) = xdim
+#else
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+# ifdef add_extra_row
+    dim2(2) =  ydim
+# else
+    dim2(2) = ymdim
+# endif
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+#endif
+    rc = nf90_def_var(ncid, vname, nf90_double,  dim2,  datid)
+    rc = nf90_put_att(ncid, datid,            'units',  vunit)
+    rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+    !if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  mval)
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  0.0d0)
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, '_FillValue',     0.0d0)
+  enddo !ii
+   rc = nf90_enddef(ncid)
+   rc = nf90_close(ncid)
+
+  end subroutine setup_cdf
+
+  !-----------------------------------------------------------------------------
+
+  subroutine putcdf(vname,jdim,ain,iin)
+
+                                  integer, intent(in) :: jdim
+                         character(len=*), intent(in) :: vname
+     real(kind=8), dimension(ihycom,jdim), intent(in) :: ain
+  integer(kind=4), dimension(ihycom,jdim), intent(in) :: iin
+
+  character(len=60) :: outcdf
+  integer :: xtype
+
+  outcdf = trim(dirout)//trim(gridcdf)//trim(csrc)
+  print *,'writing ',trim(vname),' to ',trim(outcdf)
+
+  rc = nf90_open(trim(outcdf), nf90_write, ncid)
+
+  rc = nf90_inq_varid(ncid, trim(vname),  datid)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  rc = nf90_inquire_variable(ncid, datid, xtype=xtype)
+
+  if(xtype .eq. 4)rc = nf90_put_var(ncid,      datid,       iin)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  if(xtype .eq. 6)rc = nf90_put_var(ncid,      datid,       ain)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  rc = nf90_close(ncid)
+
+  end subroutine putcdf
+end module cdf
+#DECK data.F90
+module data
+
+ use param
+
+ implicit none
+
+  integer(kind=4), dimension(ihycom,jhycom) :: land
+  ! masks on p grid
+  integer(kind=4), dimension(ihycom,jhycom) :: ip
+  ! masks on other grids
+  integer(kind=4), dimension(ihycom,jhycom) :: iq
+  integer(kind=4), dimension(ihycom,jhycom) :: iu
+  integer(kind=4), dimension(ihycom,jhycom) :: iv
+
+     real(kind=4), dimension(ihycom,jhycom) :: depths
+
+     real(kind=4), dimension(ihycom,jhycom) :: plon, plat, &
+                                               qlon, qlat, &
+                                               ulon, ulat, &
+                                               vlon, vlat, &
+                                               pscx, pscy, &
+                                               qscx, qscy, &
+                                               uscx, uscy, &
+                                               vscx, vscy, &
+                                               pang, cori
+
+end module data
+#DECK extract2d.F90
+subroutine extract2d(name,jdim,ain,iin)
+
+  use param
+  use cdf
+
+  implicit none
+ 
+           integer, intent( in) :: jdim
+  character(len=*), intent( in) :: name
+      real(kind=4), intent( in) :: ain(ihycom,jhycom)
+   integer(kind=4), intent( in) :: iin(ihycom,jhycom)
+
+      real(kind=8) :: a2d(ihycom,jdim)
+   integer(kind=4) :: i2d(ihycom,jdim)
+
+  integer :: i,j,ii,jj
+
+  a2d = 0.0
+  i2d = 0.0
+  print *,
+  print *,'starting values ',trim(name),' ',minval(ain),maxval(ain),&
+                                        ' ',minval(iin),maxval(iin)
+  do j = 1,jhycom
+   print *,j,ain(376,j)
+  enddo
+#ifdef hycom2cice
+  a2d(1:ihycom,1:jdim) = ain(1:ihycom,2:jdim+1)
+  i2d(1:ihycom,1:jdim) = iin(1:ihycom,2:jdim+1)
+#else
+  a2d(1:ihycom,1:jdim) = ain(1:ihycom,1:jdim)
+  i2d(1:ihycom,1:jdim) = iin(1:ihycom,1:jdim)
+#endif
+  print *,'ending   values ',trim(name),' ',minval(real(a2d,4)),maxval(real(a2d,4)),&
+                                        ' ',minval(i2d),maxval(i2d)
+
+  call putcdf(trim(name),jdim,a2d,i2d)
+
+end subroutine extract2d
+#DECK field_defs.F90
+module field_defs
+
+  use param
+
+  implicit none
+
+  type FieldsDefs
+    character(len=12)                           :: varname
+    character(len=12)                           :: varunit
+    character(len=60)                           :: varlong
+    character(len=12)                           :: stagger
+  end type FieldsDefs
+
+  type(FieldsDefs) :: gridfields(nvars)
+
+  contains
+
+  subroutine fieldatts_setup
+
+  integer :: i
+  integer :: ii = 0
+#ifdef hycom2cice
+  ii = ii + 1
+  gridfields(ii)%varname     = 'tlat'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'Latitude of T points'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'tlon'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'Longitude of T points'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulat'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'Latitude of U points'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulon'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'Longitude of U points'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'angle'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'Rotation Angle of U cells'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'hte'
+  gridfields(ii)%varunit     = 'cm'
+  gridfields(ii)%varlong     = 'Width of T cells on E side'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'htn'
+  gridfields(ii)%varunit     = 'cm'
+  gridfields(ii)%varlong     = 'Width of T cells on N side'
+  gridfields(ii)%stagger     = 'edge2'
+#else
+  ii = ii + 1
+  gridfields(ii)%varname     = 'land'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ip'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iu'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iv'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iq'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'bathy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'bathymetry on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pang'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'angle of p grid w/rt standard lat/lon'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'cori'
+  gridfields(ii)%varunit     = 's-1'
+  gridfields(ii)%varlong     = 'coriolis parameter on q grid'
+  gridfields(ii)%stagger     = 'center'
+#endif
+
+  if(ii .ne. nvars)stop
+
+ end subroutine fieldatts_setup
+end module field_defs
+#DECK grid_lonlat.F90
+      subroutine grid_lonlat
+#ifdef hycom1deg
+      use param
+      use data
+
+      implicit none
+!c
+      integer :: idm, jdm
+
+      integer          i,j,mapflg
+      logical          lperiod
+      real             hmaxa,hmina
+
+      real*4 spherdist  ! fn for distance between geo. pos
+!c
+      double precision, parameter :: half   = 0.5d0
+      double precision, parameter :: halfpi = 1.5707963268d0
+      double precision, parameter :: radian = 57.29578d0
+#ifdef test
+      double precision pntlon,pntlat,oldlon,oldlat
+c
+c --- create a specified longitude and latitude grid definition file.
+c
+c --- for compatibility:
+c ---   idm,jdm are input from regional.grid.b,
+c ---   and the output is to fort.61 and fort.61A
+c ---   the latter should subsequently be renamed regional.grid.[ab].
+c
+      real*4 spherdist  ! fn for distance between geo. pos
+c
+      double precision, parameter :: half   = 0.5d0
+      double precision, parameter :: halfpi = 1.5707963268d0
+      double precision, parameter :: radian = 57.29578d0
+c
+      integer, allocatable :: ip(:,:)
+      real, allocatable    :: pang(:,:),cori(:,:)
+      real, allocatable    :: plon(:,:),qlon(:,:),ulon(:,:),vlon(:,:)
+      real, allocatable    :: plat(:,:),qlat(:,:),ulat(:,:),vlat(:,:)
+      real, allocatable    :: pscx(:,:),qscx(:,:),uscx(:,:),vscx(:,:)
+      real, allocatable    :: pscy(:,:),qscy(:,:),uscy(:,:),vscy(:,:)
+c
+      call xcspmd  !input idm,jdm
+      allocate(   ip(idm,jdm) )
+      allocate( pang(idm,jdm), cori(idm,jdm) )
+      allocate( plat(idm,jdm), plon(idm,jdm) )
+      allocate( qlat(idm,jdm), qlon(idm,jdm) )
+      allocate( ulat(idm,jdm), ulon(idm,jdm) )
+      allocate( vlat(idm,jdm), vlon(idm,jdm) )
+      allocate( pscy(idm,jdm), pscx(idm,jdm) )
+      allocate( qscy(idm,jdm), qscx(idm,jdm) )
+      allocate( uscy(idm,jdm), uscx(idm,jdm) )
+      allocate( vscy(idm,jdm), vscx(idm,jdm) )
+c
+c --- read in the map projection.
+c ---   'idm   ' = longitudinal array size
+c ---   'jdm   ' = latitudinal  array size
+c ---   'pntlon' = longitudinal grid point on pressure grid (idm values)
+c ---   'pntlat' = latitudinal  grid point on pressure grid (jdm values)
+c
+      mapflg = 2
+      call blkini(i,      'idm   ')
+      call blkini(j,      'jdm   ')
+c
+      if     (i.ne.idm .or. j.ne.jdm) then
+        write(lp,'(/a,a/)') 'stdin and regional.grid.b have',
+     &                      ' different idm,jdm values'
+        call flush(lp)
+        stop
+      endif
+c
+      oldlon = -999.9
+      do i= 1,idm
+        call blkinr(pntlon,
+     &             'pntlon','("blkinr: ",a6," =",f11.4," ")')
+c
+        if     (pntlon.le.oldlon) then
+          write(lp,'(/a/)') 'pntlon must be an ascending sequence'
+          call flush(lp)
+          stop
+        endif
+c
+        plon(i,:) = pntlon
+        oldlon    = pntlon
+      enddo
+c
+      oldlat = -90.01
+      do j= 1,jdm
+        call blkinr(pntlat,
+     &             'pntlat','("blkinr: ",a6," =",f11.4," ")')
+c
+        if     (pntlat.le.oldlat) then
+          write(lp,'(/a/)') 'pntlat must be an ascending sequence'
+          call flush(lp)
+          stop
+        endif
+c
+        plat(:,j) = pntlat
+        oldlat    = pntlat
+      enddo
+#endif
+
+     idm = ihycom; jdm = jhycom
+!c
+!c --- define the 4 staggered grids.
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          pang(i,j) = 0.0  ! standard lon-lat orientation
+!c
+          vlon(i,j) = plon(i,j)
+          if     (i.ne.1) then
+            qlon(i,j) = 0.5*(plon(i-1,j) + plon(i,j))
+          else
+            qlon(i,j) = 1.5*plon(1,j) - 0.5*plon(2,j)
+          endif
+          ulon(i,j) = qlon(i,j)
+!c
+          ulat(i,j) = plat(i,j)
+          if     (j.ne.1) then
+            qlat(i,j) = 0.5*(plat(i,j-1) + plat(i,j))
+          else
+            qlat(i,j) = 1.5*plat(i,1) - 0.5*plat(i,2)
+          endif
+          vlat(i,j) = qlat(i,j)
+        enddo
+      enddo
+!c
+#ifdef test
+      write(6, *)
+      do j= 1,jdm
+        write(6,'(a,i5,2f10.3)') &
+          'j,qlat =',j,minval(qlat(:,j)),maxval(qlat(:,j))
+        write(6,'(a,i5,2f10.3)') &
+          'j,plat =',j,minval(plat(:,j)),maxval(plat(:,j))
+      enddo
+      write(6, *)
+      do i= 1,idm
+        write(6,'(a,i5,2f10.3)') &
+          'i,qlon =',i,minval(qlon(i,:)),maxval(qlon(i,:))
+        write(6,'(a,i5,2f10.3)') &
+          'i,plon =',i,minval(plon(i,:)),maxval(plon(i,:))
+      enddo
+#endif
+#ifdef test
+c
+c --- write header.
+c
+      call zhopen(61, 'formatted', 'new', 0)
+      write(61,'(i5,a)')
+     &  idm,   "    'idm   ' = longitudinal array size"
+      write(61,'(i5,a)')
+     &  jdm,   "    'jdm   ' = latitudinal  array size"
+      write(61,'(i5,a,a)')
+     &  mapflg,"    'mapflg' = map flag",
+     &         " (-1=unknown,0=mercator,2=uniform,4=f-plane)"
+c
+      write(6, *)
+      write(6,'(i5,a)')
+     &  idm,   "    'idm   ' = longitudinal array size"
+      write(6,'(i5,a)')
+     &  jdm,   "    'jdm   ' = latitudinal  array size"
+      write(6,'(i5,a)')
+     &  mapflg,"    'mapflg' = map flag (-1=unknown,0=mercator,...)"
+c
+c --- write grid arrays.
+c
+      call zaiost
+      call zaiopn('new', 61)
+      call zaiowr(plon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'plon',hmina,hmaxa
+      write(6, 6100) 'plon',hmina,hmaxa
+      call zaiowr(plat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'plat',hmina,hmaxa
+      write(6, 6100) 'plat',hmina,hmaxa
+      call zaiowr(qlon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'qlon',hmina,hmaxa
+      write(6, 6100) 'qlon',hmina,hmaxa
+      call zaiowr(qlat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'qlat',hmina,hmaxa
+      write(6, 6100) 'qlat',hmina,hmaxa
+      call zaiowr(ulon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'ulon',hmina,hmaxa
+      write(6, 6100) 'ulon',hmina,hmaxa
+      call zaiowr(ulat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'ulat',hmina,hmaxa
+      write(6, 6100) 'ulat',hmina,hmaxa
+      call zaiowr(vlon, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'vlon',hmina,hmaxa
+      write(6, 6100) 'vlon',hmina,hmaxa
+      call zaiowr(vlat, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'vlat',hmina,hmaxa
+      write(6, 6100) 'vlat',hmina,hmaxa
+      call zaiowr(pang, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6100) 'pang',hmina,hmaxa
+      write(6, 6100) 'pang',hmina,hmaxa
+      write(6, *)
+ 6100 format(a,':  min,max = ',2f15.5)
+#endif
+!c
+!c --- grid spacing in meters.
+!c
+      lperiod = maxval(plon(:,:))-minval(plon(:,:)) .gt. 350.0
+      if     (lperiod) then
+        write(6,'(a)') 'domain assumed to be periodic'
+      else
+        write(6,'(a)') 'domain assumed to be non-periodic'
+      endif
+!c
+      do j= 1,jdm
+        do i= 2,idm
+          uscx(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                plon(i-1,j),plat(i-1,j) )
+          qscx(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                vlon(i-1,j),vlat(i-1,j) )
+        enddo
+        i=1
+        if     (lperiod) then
+          uscx(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                plon(idm,j),plat(idm,j) )
+          qscx(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                vlon(idm,j),vlat(idm,j) )
+        else
+          uscx(i,j) = uscx(i+1,j)  ! updated below except in corner
+          qscx(i,j) = qscx(i+1,j)  ! updated below except in corner
+        endif
+        do i= 1,idm-1
+          vscx(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                qlon(i+1,j),qlat(i+1,j) )
+          pscx(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                ulon(i+1,j),ulat(i+1,j) )
+        enddo
+        i=idm
+        if     (lperiod) then
+          vscx(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                qlon(1,  j),qlat(1,  j) )
+          pscx(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                ulon(1,  j),ulat(1,  j) )
+        else
+          vscx(i,j) = vscx(i-1,j)  ! updated below except in corner
+          pscx(i,j) = pscx(i-1,j)  ! updated below except in corner
+        endif
+      enddo
+!c
+      do j= 1,jdm
+        if     (j.ne.1) then
+          do i= 1,idm
+            vscy(i,j) = spherdist(plon(i,  j),plat(i,  j), &
+                                  plon(i,j-1),plat(i,j-1) )
+            qscy(i,j) = spherdist(ulon(i,  j),ulat(i,  j), &
+                                  ulon(i,j-1),ulat(i,j-1) )
+          enddo
+        endif
+        if     (j.ne.jdm) then
+          do i= 1,idm
+            uscy(i,j) = spherdist(qlon(i,  j),qlat(i,  j), &
+                                  qlon(i,j+1),qlat(i,j+1) )
+            pscy(i,j) = spherdist(vlon(i,  j),vlat(i,  j), &
+                                  vlon(i,j+1),vlat(i,j+1) )
+          enddo
+        endif
+      enddo
+!c
+!c     fill in the edges, assuming constant grid aspect ratio
+!c
+      j=1
+      do i= 1,idm
+        vscy(i,j) = vscx(i,j)*vscy(i,j+1)/vscx(i,j+1)
+        qscy(i,j) = qscx(i,j)*qscy(i,j+1)/qscx(i,j+1)
+      enddo
+      j=jdm
+      do i= 1,idm
+        uscy(i,j) = uscx(i,j)*uscy(i,j-1)/uscx(i,j-1)
+        pscy(i,j) = pscx(i,j)*pscy(i,j-1)/pscx(i,j-1)
+      enddo
+!c
+      if     (.not.lperiod) then
+        i=1
+        do j= 1,jdm
+          uscx(i,j) = uscy(i,j)*uscx(i+1,j)/uscy(i+1,j)
+          qscx(i,j) = qscy(i,j)*qscx(i+1,j)/qscy(i+1,j)
+        enddo
+        i=idm
+        do j= 1,jdm
+          vscx(i,j) = vscy(i,j)*vscx(i-1,j)/vscy(i-1,j)
+          pscx(i,j) = pscy(i,j)*pscx(i-1,j)/pscy(i-1,j)
+        enddo
+      endif
+!c
+#ifdef test
+      write(6, *)
+      do j= 1,jdm
+        write(6,'(a,i5,3f10.2)') &
+          'j,vy =',j,minval(vscy(:,j)),maxval(vscy(:,j)), &
+                     maxval(vscy(:,j))-minval(vscy(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,vx =',j,minval(vscx(:,j)),maxval(vscx(:,j)), &
+                     maxval(vscx(:,j))-minval(vscx(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,uy =',j,minval(uscy(:,j)),maxval(uscy(:,j)), &
+                     maxval(uscy(:,j))-minval(uscy(:,j))
+        write(6,'(a,i5,3f10.2)') &
+          'j,ux =',j,minval(uscx(:,j)),maxval(uscx(:,j)), &
+                     maxval(uscx(:,j))-minval(uscx(:,j))
+      enddo
+      write(6, *)
+#endif
+#ifdef test
+c
+c --- write grid arrays.
+c
+      call zaiowr(pscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'pscx',hmina,hmaxa
+      write(6, 6110) 'pscx',hmina,hmaxa
+      call zaiowr(pscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'pscy',hmina,hmaxa
+      write(6, 6110) 'pscy',hmina,hmaxa
+      call zaiowr(qscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'qscx',hmina,hmaxa
+      write(6, 6110) 'qscx',hmina,hmaxa
+      call zaiowr(qscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'qscy',hmina,hmaxa
+      write(6, 6110) 'qscy',hmina,hmaxa
+      call zaiowr(uscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'uscx',hmina,hmaxa
+      write(6, 6110) 'uscx',hmina,hmaxa
+      call zaiowr(uscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'uscy',hmina,hmaxa
+      write(6, 6110) 'uscy',hmina,hmaxa
+      call zaiowr(vscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'vscx',hmina,hmaxa
+      write(6, 6110) 'vscx',hmina,hmaxa
+      call zaiowr(vscy, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6110) 'vscy',hmina,hmaxa
+      write(6, 6110) 'vscy',hmina,hmaxa
+      write(6, *)
+ 6110 format(a,':  min,max = ',2f15.5)
+#endif
+!c
+!c --- coriolis
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          cori(i,j)=sin(qlat(i,j)/radian)* &
+                    8.d0*halfpi/86164.0d0  ! sidereal day
+        enddo
+      enddo
+#ifdef test
+c
+      call zaiowr(cori, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6120) 'cori',hmina,hmaxa
+      write(6, 6120) 'cori',hmina,hmaxa
+      write(6, *)
+ 6120 format(a,':  min,max = ',2f15.10)
+#endif
+#ifdef test
+!c
+!c --- grid aspect ratio.
+!c
+      do j= 1,jdm
+        do i= 1,idm
+          if     (pscy(i,j).eq.0.0) then
+            pscx(i,j) = 99.0
+          elseif (pscx(i,j).ge.99.0*pscy(i,j)) then
+            pscx(i,j) = 99.0
+          else
+            pscx(i,j) = pscx(i,j)/pscy(i,j)
+          endif
+        enddo
+      enddo
+c
+      call zaiowr(pscx, ip,.false., hmina,hmaxa, 61, .false.)
+      write(61,6130) 'pasp',hmina,hmaxa
+      write(6, 6130) 'pasp',hmina,hmaxa
+      write(6, *)
+ 6130 format(a,':  min,max = ',2f15.5)
+c
+      close(unit=61)
+      call zaiocl(61)
+c
+      end
+      subroutine blkinr(rvar,cvar,cfmt)
+      implicit none
+c
+      double precision rvar
+      character        cvar*6,cfmt*(*)
+c
+      integer       lp
+      common/linepr/lp
+c
+c     read in one real value from stdin
+c
+      character*6 cvarin
+c
+      read(*,*) rvar,cvarin
+      write(lp,cfmt) cvarin,rvar
+      call flush(lp)
+c
+      if     (cvar.ne.cvarin) then
+        write(lp,*) 
+        write(lp,*) 'error in blkinr - input ',cvarin,
+     +                      ' but should be ',cvar
+        write(lp,*) 
+        call flush(lp)
+        stop
+      endif
+      return
+      end
+      subroutine blkini(ivar,cvar)
+      implicit none
+c
+      integer     ivar
+      character*6 cvar
+c
+      integer       lp
+      common/linepr/lp
+c
+c     read in one integer value from stdin
+c
+      character*6 cvarin
+c
+      read(*,*) ivar,cvarin
+      write(lp,6000) cvarin,ivar
+      call flush(lp)
+c
+      if     (cvar.ne.cvarin) then
+        write(lp,*) 
+        write(lp,*) 'error in blkini - input ',cvarin,
+     +                      ' but should be ',cvar
+        write(lp,*) 
+        call flush(lp)
+        stop
+      endif
+      return
+ 6000 format('blkini: ',a6,' =',i6)
+#endif
+#endif
+      end subroutine grid_lonlat
+#DECK param.F90
+module param
+
+  implicit none
+#ifdef hycom1deg
+  !Hycom 1deg grid
+  integer, parameter ::  ihycom =  360,  jhycom =  168
+
+  !real, parameter :: latbeg =  89.25
+  real, parameter :: latbeg =  -77.00
+  real, parameter :: lonbeg =   0.50
+#else
+  !Hycom 0.25 grid (tripole)
+  integer, parameter ::  ihycom = 1500,  jhycom = 1100
+#endif
+#ifdef hycom2cice
+  !   real, parameter :: deg2rad = (2.0*3.14)/360.0
+     real, parameter :: deg2rad = 1.0
+
+  integer, parameter :: nvars =  2 &  !tlat,tlon
+                              +  2 &  !ulat,ulon
+                              +  1 &  !angle
+                              +  2    !htn,hte
+#else
+  integer, parameter :: nvars =  1 &  !land
+                              +  4 &  !ip,iu,iv,iq
+                              +  1 &  !bathy
+                              + 18   
+#endif
+end module param
+#DECK spherdist.F90
+      real*4 function spherdist(lon1,lat1,lon2,lat2)
+      implicit none
+      real, intent(in) :: lon1,lat1,lon2,lat2 ! Pos. in degrees
+!c
+!c --- ------------------------------------------------
+!c --- Computes the distance between geo. pos.
+!c --- lon1,lat1 and lon2,lat2. 
+!c --- input is in degrees.
+!c
+!c --- output is real*4 for better global consistancy,
+!c --- by truncating double precision roundoff errors.
+!c --- real*4 is not in f90, but is widely supported.
+!c
+!c --- Based on m_spherdist.F90 from Geir Evanson.
+!c --- ------------------------------------------------
+!c
+      double precision, parameter :: invradian=0.017453292d0
+      double precision, parameter ::    rearth=6371001.0d0  ! Radius of earth
+!c
+      double precision  dlon1,dlon2
+      double precision  rlon1,rlat1,rlon2,rlat2           ! Pos. in radians
+      double precision  x1,y1,z1,x2,y2,z2                 ! Cartesian position
+      double precision  dr                                ! Arc length
+!c
+!c     ensure that spherdist(ax,ay,bx,by) == spherdist(bx,by,ax,ay)
+!c
+      dlon1 = lon1
+      dlon1 = mod(dlon1,360.d0)
+      if     (dlon1.lt.0.d0) then
+        dlon1 = dlon1 + 360.d0
+      endif
+      dlon2 = lon2
+      dlon2 = mod(dlon2,360.d0)
+      if     (dlon2.lt.0.d0) then
+        dlon2 = dlon2 + 360.d0
+      endif
+      if     (lat1.lt.lat2) then
+        rlon1=dlon1*invradian            !lon1 in rad
+        rlat1=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon2=dlon2*invradian            !lon2 in rad
+        rlat2=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      elseif (lat1.eq.lat2 .and. dlon1.le.dlon2) then
+        rlon1=dlon1*invradian            !lon1 in rad
+        rlat1=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon2=dlon2*invradian            !lon2 in rad
+        rlat2=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      else
+        rlon2=dlon1*invradian            !lon1 in rad
+        rlat2=(90.d0-lat1)*invradian     !90-lat1 in rad 
+        rlon1=dlon2*invradian            !lon2 in rad
+        rlat1=(90.d0-lat2)*invradian     !90-lat2 in rad 
+      endif
+!c
+      x1= sin(rlat1)*cos(rlon1)        !x,y,z of pos 1.
+      y1= sin(rlat1)*sin(rlon1)
+      z1= cos(rlat1) 
+!c
+      x2= sin(rlat2)*cos(rlon2)        !x,y,z of pos 2.
+      y2= sin(rlat2)*sin(rlon2)
+      z2= cos(rlat2) 
+!c
+      dr=acos(min(1.d0,x1*x2+y1*y2+z1*z2))  ! Arc length
+!c
+      spherdist=dr*rearth
+!c
+      end function spherdist
+#DECK xhygrid.F90
+program xhygrid
+
+  use param
+  use cdf
+  use data
+  use field_defs
+  use mod_za    ! HYCOM array I/O interface
+  use mod_xc
+
+  implicit none
+ 
+     real :: xmin, xmax
+  integer :: i,j,ii,jj,jlast
+
+  integer(kind=4), dimension(0:ihycom,0:jhycom) :: xip
+
+  integer(kind=4), dimension(ihycom,jhycom) :: i2d
+     real(kind=4), dimension(ihycom,jhycom) :: a2d
+#ifdef hycom1deg
+  character(len=80) :: bathycdf
+  real(kind=8), dimension(ihycom,jhycom) :: bathy
+#else
+  call xcspmd
+  print *,idm,jdm
+  call zaiost
+  lp=6
+
+  if(idm .ne. ihycom .or. jdm .ne. jhycom)stop
+  ip = 1
+
+  print *,idm,jdm
+  print *,ihycom,jhycom
+#endif
+  ! set up the variable attributes for netcdf file
+  call fieldatts_setup
+ 
+  call setup_cdf
+#ifdef hycom1deg
+  ! regular grid 1deg
+  plat(:,1) = latbeg
+  plon(1,:) = 0.5
+
+  ! set up grid
+  do j = 2,jhycom
+   !plat(:,j) = plat(:,1) - 1.0*float(j-1)
+   plat(:,j) = plat(:,1) + 1.0*float(j-1)
+  enddo
+  do i = 2,ihycom
+   plon(i,:) = plon(1,:) + 1.0*float(i-1)
+  enddo
+  print *,plon(1,1),plon(ihycom,1)
+  print *,plat(1,1),plat(1,jhycom)
+
+  ! get the bathy 
+  bathycdf = '/data1/GRIDS/hycom_bathy_1deg.nc'
+  rc = nf90_open(trim(bathycdf), nf90_nowrite, ncid)
+  print *,'getting bathy from ',trim(bathycdf),trim(nf90_strerror(rc))
+
+  rc = nf90_inq_varid(ncid, 'bathy', datid)
+  rc = nf90_get_var(ncid, datid,     bathy)
+  rc = nf90_close(ncid)
+
+  depths = real(bathy,4)
+  depths(:,1) = 0.0
+  where(depths .lt. 0.0)depths = 0.0
+
+                          land = 1
+   where(depths .eq.  0.0)land = 0
+
+  ! hycom horizontal grid routine
+  call grid_lonlat
+#else
+  ! hycom horizontal grid
+
+   call zaiopf('input_024/regional.grid.a', 'OLD', 21)
+
+   ! lat/lon at P,Q,U,V grids
+   call zaiord(plon,ip,.false., xmin,xmax, 21)
+   call zaiord(plat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qlon,ip,.false., xmin,xmax, 21)
+   call zaiord(qlat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(ulon,ip,.false., xmin,xmax, 21)
+   call zaiord(ulat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vlon,ip,.false., xmin,xmax, 21)
+   call zaiord(vlat,ip,.false., xmin,xmax, 21)
+   ! angle between p grid and geolat,geolon
+   call zaiord(pang,ip,.false., xmin,xmax, 21)
+
+   ! grid spacing in meters of all 4 grids
+   call zaiord(pscx,ip,.false., xmin,xmax, 21)
+   call zaiord(pscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qscx,ip,.false., xmin,xmax, 21)
+   call zaiord(qscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(uscx,ip,.false., xmin,xmax, 21)
+   call zaiord(uscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vscx,ip,.false., xmin,xmax, 21)
+   call zaiord(vscy,ip,.false., xmin,xmax, 21)
+
+   ! coriolis
+   call zaiord(cori,ip,.false., xmin,xmax, 21)
+
+   call zaiocl(21)
+   print *,'closing regional.grid.a'
+
+   i = 376; j = 1100
+   print *,vlon(i,j),vlat(i,j)
+   i = 1126; j = 1100
+   print *,vlon(i,j),vlat(i,j)
+
+   ! hycom bathymetry
+
+   call zaiopf('input_024/regional.depth.a', 'OLD', 22)
+   call zaiord(depths,ip,.false., xmin,xmax, 22)
+   call zaiocl(22)
+   print *,'closing regional.depth.a'
+
+   print *,xmin,xmax
+                          land = 1
+   where(depths .gt. xmax)land = 0
+   where(depths .gt. xmax)depths = 0.0
+
+   do i = 1,ihycom
+    write(20,*)j,pang(i,1099),pang(i,1100)
+   enddo
+#endif
+! Following code from bigrid.f ln 216
+!c --- u,v points are located halfway between any 2 adjoining mass points
+!c --- 'interior' q points require water on all 4 sides.
+!c --- 'promontory' q points require water on 3 (or at least 2
+!c --- diametrically opposed) sides
+
+      xip = 0
+       ip = 0; iu = 0; iv = 0; iq = 0
+     do j = 1,jhycom
+      do i = 1,ihycom
+       if(depths(i,j) .gt. 0.)then
+         ip(i,j) = 1
+        xip(i,j) = 1
+       endif
+      enddo
+     enddo
+     ! set xip consistent w/ closed southern boundary, periodic eastern
+     xip(:,0) = xip(:,1)
+     xip(0,:) = xip(1,:)    
+
+      do j=1,jhycom
+        do i=1,ihycom
+          if (xip(i-1,j).gt.0.and.xip(i,j).gt.0) then
+            iu(i,j)=1
+          endif
+          if (xip(i,j-1).gt.0.and.xip(i,j).gt.0) then
+            iv(i,j)=1
+          endif
+          if (min(xip(i,j),xip(i-1,j),xip(i,j-1),xip(i-1,j-1)).gt.0) then
+            iq(i,j)=1
+          elseif ((xip(i  ,j).gt.0.and.xip(i-1,j-1).gt.0).or. &
+                  (xip(i-1,j).gt.0.and.xip(i  ,j-1).gt.0)    ) then
+            iq(i,j)=1
+          endif
+        enddo
+      enddo
+
+! write the netCDF file
+  pang(:,jhycom) = pang(:,jhycom-1)
+#ifdef add_extra_row
+! used for putting output on regular lat/lon grid
+  jlast = jhycom
+#else
+  jlast = jhycom-1
+#endif
+#ifdef hycom2cice
+  i2d = 0.0
+  call extract2d( 'tlat',jlast,plat*deg2rad,i2d)
+  call extract2d( 'tlon',jlast,plon*deg2rad,i2d)
+
+  call extract2d( 'ulat',jlast,qlat*deg2rad,i2d)
+  call extract2d( 'ulon',jlast,qlon*deg2rad,i2d)
+
+!  call extract2d(  'hte',jlast,uscy,i2d)
+!  call extract2d(  'htn',jlast,vscx,i2d)
+
+!  call extract2d('angle',jlast,pang,i2d)
+#else
+  a2d = 0.0
+  call extract2d('land', jlast,a2d,land)
+  call extract2d(  'ip', jlast,a2d,  ip)
+  call extract2d(  'iu', jlast,a2d,  iu)
+  call extract2d(  'iv',jhycom,a2d,  iv)
+  call extract2d(  'iq',jhycom,a2d,  iq)
+
+  i2d = 0.0
+  call extract2d('bathy', jlast,depths,i2d)
+
+  call extract2d( 'plat', jlast,plat,i2d)
+  call extract2d( 'plon', jlast,plon,i2d)
+
+  call extract2d( 'ulat', jlast,ulat,i2d)
+  call extract2d( 'ulon', jlast,ulon,i2d)
+
+  call extract2d( 'pscx', jlast,pscx,i2d)
+  call extract2d( 'pscy', jlast,pscy,i2d)
+
+  call extract2d( 'uscx', jlast,uscx,i2d)
+  call extract2d( 'uscy', jlast,uscy,i2d)
+
+  call extract2d( 'pang', jlast,pang,i2d)
+  call extract2d( 'cori', jlast,cori,i2d)
+
+  call extract2d( 'qlat',jhycom,qlat,i2d)
+  call extract2d( 'qlon',jhycom,qlon,i2d)
+
+  call extract2d( 'vlat',jhycom,vlat,i2d)
+  call extract2d( 'vlon',jhycom,vlon,i2d)
+
+  call extract2d( 'qscx',jhycom,qscx,i2d)
+  call extract2d( 'qscy',jhycom,qscy,i2d)
+
+  call extract2d( 'vscx',jhycom,vscx,i2d)
+  call extract2d( 'vscy',jhycom,vscy,i2d)
+#endif
+end program XHygrid

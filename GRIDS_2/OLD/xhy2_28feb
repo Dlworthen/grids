@@ -1,0 +1,522 @@
+#DECK cdf.F90
+module cdf
+
+  use param
+  use field_defs
+  use netcdf
+
+  implicit none
+
+  integer, parameter :: ndim1 = 1, ndim2 = 2, ndim3 = 3, ndim4 = 4
+
+  integer, dimension(ndim1) :: dim1, corner1, edge1
+  integer, dimension(ndim2) :: dim2, corner2, edge2
+  integer, dimension(ndim3) :: dim3, corner3, edge3
+  integer, dimension(ndim4) :: dim4, corner4, edge4
+
+  !character(len=60) :: cdffile = '/data1/GRIDS/hycom_grid_q25.nc'
+  !character(len=60) :: cdffile = '/data1/GRIDS/hycom_grid_1deg.nc'
+  character(len=60) :: cdffile = '/data1/GRIDS/hycom_test.nc'
+
+  real(kind=8) :: mval = -9999.
+
+  integer :: rc,ncid
+  integer :: xdim, ydim, ymdim, datid
+
+  contains
+   
+  !-----------------------------------------------------------------------------
+   
+  subroutine setup_cdf
+
+            integer :: ii
+  character(len=12) :: vname, vunit, stggr
+  character(len=60) :: vlong
+
+  rc = nf90_create(trim(cdffile), nf90_clobber, ncid)
+  rc = nf90_def_dim(ncid, 'ni',   iqdeg,    xdim)
+  rc = nf90_def_dim(ncid, 'nj',   jqdeg,    ydim)
+  rc = nf90_def_dim(ncid, 'njm1', jqdeg-1, ymdim)
+
+  !land
+     ii = 1
+  vname = trim(gridfields(ii)%varname)
+  vunit = trim(gridfields(ii)%varunit)
+  vlong = trim(gridfields(ii)%varlong)
+
+  ! masks
+  do ii = 1,5 
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+    dim2(2) = ymdim
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+   rc = nf90_def_var(ncid, vname,    nf90_int,  dim2,  datid)
+   rc = nf90_put_att(ncid, datid,            'units',  vunit)
+   rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+  enddo
+
+  do ii = 6,nvars
+   vname = trim(gridfields(ii)%varname)
+   vunit = trim(gridfields(ii)%varunit)
+   vlong = trim(gridfields(ii)%varlong)
+   stggr = trim(gridfields(ii)%stagger)
+
+   if((stggr .eq. 'center') .or. &
+       (stggr .eq. 'edge1'))then
+    dim2(2) = ymdim
+   else
+    dim2(2) = ydim
+   endif
+    dim2(1) = xdim
+    rc = nf90_def_var(ncid, vname, nf90_double,  dim2,  datid)
+    rc = nf90_put_att(ncid, datid,            'units',  vunit)
+    rc = nf90_put_att(ncid, datid,        'long_name',  vlong)
+    !if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  mval)
+    if(trim(vname) .eq. 'bathy')rc = nf90_put_att(ncid, datid, 'missing_value',  0.0)
+  enddo !ii
+   rc = nf90_enddef(ncid)
+   rc = nf90_close(ncid)
+
+  end subroutine setup_cdf
+
+  !-----------------------------------------------------------------------------
+
+  subroutine putcdf(vname,jdim,ain,iin)
+
+                                 integer, intent(in) :: jdim
+                        character(len=*), intent(in) :: vname
+     real(kind=8), dimension(iqdeg,jdim), intent(in) :: ain
+  integer(kind=4), dimension(iqdeg,jdim), intent(in) :: iin
+
+  integer :: xtype
+
+  rc = nf90_open(trim(cdffile), nf90_write, ncid)
+
+  rc = nf90_inq_varid(ncid, trim(vname),  datid)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  rc = nf90_inquire_variable(ncid, datid, xtype=xtype)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  print *,trim(vname),xtype
+
+  if(xtype .eq. 4)rc = nf90_put_var(ncid,      datid,       iin)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  if(xtype .eq. 6)rc = nf90_put_var(ncid,      datid,       ain)
+  if(rc .ne. 0)print *,trim(nf90_strerror(rc))
+  rc = nf90_close(ncid)
+
+  end subroutine putcdf
+end module cdf
+#DECK extract2d.F90
+subroutine extract2d(name,jdim,ain,iin)
+
+  use param
+  use cdf
+
+  implicit none
+ 
+           integer, intent( in) :: jdim
+  character(len=*), intent( in) :: name
+      real(kind=4), intent( in) :: ain(iqdeg,jqdeg)
+   integer(kind=4), intent( in) :: iin(iqdeg,jqdeg)
+
+      real(kind=8) :: a2d(iqdeg,jdim)
+   integer(kind=4) :: i2d(iqdeg,jdim)
+
+  integer :: i,j,ii,jj
+
+  a2d = 0.0
+  i2d = 0.0
+
+  print *,'starting values ',trim(name),' ',minval(ain),maxval(ain),&
+                                        ' ',minval(iin),maxval(iin)
+
+  a2d(1:iqdeg,1:jdim) = ain(1:iqdeg,1:jdim)
+  i2d(1:iqdeg,1:jdim) = iin(1:iqdeg,1:jdim)
+
+  print *,'ending   values ',trim(name),' ',minval(real(a2d,4)),maxval(real(a2d,4)),&
+                                        ' ',minval(i2d),maxval(i2d)
+  print *
+
+  call putcdf(trim(name),jdim,a2d,i2d)
+
+end subroutine extract2d
+#DECK field_defs.F90
+module field_defs
+
+  use param
+
+  implicit none
+
+  type FieldsDefs
+    character(len=12)                           :: varname
+    character(len=12)                           :: varunit
+    character(len=60)                           :: varlong
+    character(len=12)                           :: stagger
+  end type FieldsDefs
+
+  type(FieldsDefs) :: gridfields(nvars)
+
+  contains
+
+  subroutine fieldatts_setup
+
+  integer :: i
+  integer :: ii = 0
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'land'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ip'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iu'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iv'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'iq'
+  gridfields(ii)%varunit     = ' '
+  gridfields(ii)%varlong     = 'land mask on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'bathy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'bathymetry on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'plon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'ulon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlat'
+  gridfields(ii)%varunit     = 'degree_north'
+  gridfields(ii)%varlong     = 'latitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vlon'
+  gridfields(ii)%varunit     = 'degree_east'
+  gridfields(ii)%varlong     = 'longitude of v grid'
+  gridfields(ii)%stagger     = 'edge2'
+!#ifdef test
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on p grid'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'qscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on q grid'
+  gridfields(ii)%stagger     = 'corner'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'uscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on u grid'
+  gridfields(ii)%stagger     = 'edge1'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscx'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing x-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'vscy'
+  gridfields(ii)%varunit     = 'm'
+  gridfields(ii)%varlong     = 'grid spacing y-direction on v grid'
+  gridfields(ii)%stagger     = 'edge2'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'pang'
+  gridfields(ii)%varunit     = 'radians'
+  gridfields(ii)%varlong     = 'angle of p grid w/rt standard lat/lon'
+  gridfields(ii)%stagger     = 'center'
+
+  ii = ii + 1
+  gridfields(ii)%varname     = 'cori'
+  gridfields(ii)%varunit     = 's-1'
+  gridfields(ii)%varlong     = 'coriolis parameter on q grid'
+  gridfields(ii)%stagger     = 'center'
+!#endif
+  if(ii .ne. nvars)stop
+
+ end subroutine fieldatts_setup
+end module field_defs
+#DECK param.F90
+module param
+
+  implicit none
+
+  !Hycom 0.25 grid
+  integer, parameter ::  iqdeg = 1500,  jqdeg = 1100
+ 
+  integer, parameter :: iout = 1500, jout = 1100
+  integer, parameter :: idel = 1,    jdel = 1
+
+  ! to extract into low resolution tripole
+  !integer, parameter :: iout = 500, jout = 367
+  !integer, parameter :: idel = 3,   jdel = 3
+
+  integer, parameter :: nvars =  1 &  !land
+                              +  4 &  !ip,iu,iv,iq
+                              +  1 &  !bathy
+                              + 18 
+                              !+ 8 
+
+end module param
+#DECK xhygrid.F90
+program xhygrid
+
+  use param
+  use cdf
+  use field_defs
+  use mod_za    ! HYCOM array I/O interface
+  use mod_xc
+
+  implicit none
+ 
+     real :: xmin, xmax
+  integer :: i,j,ii,jj
+
+  integer(kind=4), dimension(iqdeg,jqdeg) :: land
+  ! masks on p grid
+  integer(kind=4), dimension(iqdeg,jqdeg) :: ip
+  ! masks on other grids
+  integer(kind=4), dimension(iqdeg,jqdeg) :: iq
+  integer(kind=4), dimension(iqdeg,jqdeg) :: iu
+  integer(kind=4), dimension(iqdeg,jqdeg) :: iv
+
+     real(kind=4), dimension(iqdeg,jqdeg) :: depths
+
+     real(kind=4), dimension(iqdeg,jqdeg) :: plon, plat, &
+                                             qlon, qlat, &
+                                             ulon, ulat, &
+                                             vlon, vlat, &
+                                             pscx, pscy, &
+                                             qscx, qscy, &
+                                             uscx, uscy, &
+                                             vscx, vscy, &
+                                             pang, cori
+
+  integer(kind=4), dimension(0:iqdeg,0:jqdeg) :: xip
+
+  integer(kind=4), dimension(iqdeg,jqdeg) :: i2d
+     real(kind=4), dimension(iqdeg,jqdeg) :: a2d
+
+  call xcspmd
+  print *,idm,jdm
+  call zaiost
+  lp=6
+
+  if(idm .ne. iqdeg .or. jdm .ne. jqdeg)stop
+  ip = 1
+
+  print *,idm,jdm
+  print *,iqdeg,jqdeg
+  print *,'iout, jout ',iout,jout
+
+  ! set up the variable attributes for netcdf file
+  call fieldatts_setup
+ 
+  call setup_cdf
+!#ifdef test
+  ! hycom horizontal grid
+
+   call zaiopf('regional.grid.a', 'OLD', 21)
+
+   ! lat/lon at P,Q,U,V grids
+   call zaiord(plon,ip,.false., xmin,xmax, 21)
+   call zaiord(plat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qlon,ip,.false., xmin,xmax, 21)
+   call zaiord(qlat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(ulon,ip,.false., xmin,xmax, 21)
+   call zaiord(ulat,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vlon,ip,.false., xmin,xmax, 21)
+   call zaiord(vlat,ip,.false., xmin,xmax, 21)
+   ! angle between p grid and geolat,geolon
+   call zaiord(pang,ip,.false., xmin,xmax, 21)
+   ! grid spacing in meters of all 4 grids
+   call zaiord(pscx,ip,.false., xmin,xmax, 21)
+   call zaiord(pscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(qscx,ip,.false., xmin,xmax, 21)
+   call zaiord(qscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(uscx,ip,.false., xmin,xmax, 21)
+   call zaiord(uscy,ip,.false., xmin,xmax, 21)
+
+   call zaiord(vscx,ip,.false., xmin,xmax, 21)
+   call zaiord(vscy,ip,.false., xmin,xmax, 21)
+   ! coriolis
+   call zaiord(cori,ip,.false., xmin,xmax, 21)
+
+   call zaiocl(21)
+   print *,'closing regional.grid.a'
+
+   ! hycom bathymetry
+
+   call zaiopf('regional.depth.a', 'OLD', 22)
+   call zaiord(depths,ip,.false., xmin,xmax, 22)
+   call zaiocl(22)
+   print *,'closing regional.depth.a'
+
+   print *,xmin,xmax
+                          land = 1
+   where(depths .gt. xmax)land = 0
+   where(depths .gt. xmax)depths = 0.0
+
+!c --- u,v points are located halfway between any 2 adjoining mass points
+!c --- 'interior' q points require water on all 4 sides.
+!c --- 'promontory' q points require water on 3 (or at least 2
+!c --- diametrically opposed) sides
+
+      xip = 0
+       ip = 0; iu = 0; iv = 0; iq = 0
+     do j = 1,jqdeg
+      do i = 1,iqdeg
+       if(depths(i,j) .gt. 0.)then
+         ip(i,j) = 1
+        xip(i,j) = 1
+       endif
+      enddo
+     enddo
+     ! set xip consistent w/ closed southern boundary, periodic eastern
+     xip(:,0) = xip(:,1)
+     xip(0,:) = xip(1,:)    
+
+      do j=1,jqdeg
+        do i=1,iqdeg
+          if (xip(i-1,j).gt.0.and.xip(i,j).gt.0) then
+            iu(i,j)=1
+          endif
+          if (xip(i,j-1).gt.0.and.xip(i,j).gt.0) then
+            iv(i,j)=1
+          endif
+          if (min(xip(i,j),xip(i-1,j),xip(i,j-1),xip(i-1,j-1)).gt.0) then
+            iq(i,j)=1
+          elseif ((xip(i  ,j).gt.0.and.xip(i-1,j-1).gt.0).or. &
+                  (xip(i-1,j).gt.0.and.xip(i  ,j-1).gt.0)    ) then
+            iq(i,j)=1
+          endif
+        enddo
+      enddo
+! write the netCDF file (extract if req)
+  a2d = 0.0
+  call extract2d('land',jqdeg-1,a2d,land)
+  call extract2d(  'ip',jqdeg-1,a2d,  ip)
+  call extract2d(  'iu',jqdeg-1,a2d,  iu)
+  call extract2d(  'iv',jqdeg,  a2d,  iv)
+  call extract2d(  'iq',jqdeg,  a2d,  iq)
+
+  i2d = 0.0
+  call extract2d('bathy',jqdeg-1,depths,i2d)
+
+  call extract2d( 'plat',jqdeg-1,plat,i2d)
+  call extract2d( 'plon',jqdeg-1,plon,i2d)
+
+  call extract2d( 'ulat',jqdeg-1,ulat,i2d)
+  call extract2d( 'ulon',jqdeg-1,ulon,i2d)
+
+  call extract2d( 'pscx',jqdeg-1,pscx,i2d)
+  call extract2d( 'pscy',jqdeg-1,pscy,i2d)
+
+  call extract2d( 'uscx',jqdeg-1,uscx,i2d)
+  call extract2d( 'uscy',jqdeg-1,uscy,i2d)
+
+  call extract2d( 'pang',jqdeg-1,pang,i2d)
+  call extract2d( 'cori',jqdeg-1,cori,i2d)
+
+  call extract2d( 'qlat',jqdeg,qlat,i2d)
+  call extract2d( 'qlon',jqdeg,qlon,i2d)
+
+  call extract2d( 'vlat',jqdeg,vlat,i2d)
+  call extract2d( 'vlon',jqdeg,vlon,i2d)
+
+  call extract2d( 'qscx',jqdeg,qscx,i2d)
+  call extract2d( 'qscy',jqdeg,qscy,i2d)
+
+  call extract2d( 'vscx',jqdeg,vscx,i2d)
+  call extract2d( 'vscy',jqdeg,vscy,i2d)
+!#endif
+
+end program XHygrid
